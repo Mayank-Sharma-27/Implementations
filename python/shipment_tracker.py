@@ -132,8 +132,6 @@ class ShipmentTracker:
                 lines.append("")
         return "\n".join(lines)        
                 
-                               
-    
     def _get_normalized_status(self, status: str) -> str:
         if status == "pickup" or status == "collected" or status == "PICKED_UP":
             return "PICKED_UP" 
