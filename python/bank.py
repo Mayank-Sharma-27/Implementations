@@ -200,10 +200,7 @@ class Bank:
                    pending_invoice["status"] = "PARTIALLY_PAID"
         
         return credit_informations           
-        
-        
-        
-        
+                
 if __name__ == "__main__":
     # --- Part 1 Test Data ---
     deposit_p1 = "dep_01|cust_A:1000:inv_101|cust_B:2500:inv_102|cust_C:500:inv_103"
