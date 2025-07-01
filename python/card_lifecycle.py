@@ -1,4 +1,44 @@
+"""
+Stripe-Style Multi-Part Problem: Card Authorization Service
+
+This problem simulates the core authorization engine for a product like Stripe
+Issuing. The service must process a stream of events for virtual cards,
+tracking their lifecycle and approving or declining transactions based on the
+card's status and available limit.
+
+The input is a single log string with events separated by '&'. Events must be
+processed chronologically by their timestamp.
+
+The event format is: `timestamp;event_type;data`
+- event_type: CARD_CREATED, CARD_STATUS_CHANGED, TX_AUTH_REQUEST, or TX_SETTLED.
+- data: A semicolon-separated string of key-value pairs (e.g., card_id=c_123).
+
+---
+
+Part 1: Card Lifecycle Tracking
+- Determine the final status (ACTIVE, INACTIVE, CANCELED) of each card.
+
+Part 2: Simple Transaction Authorization
+- Categorize transactions as 'authorized' or 'declined' based only on whether
+  the card is ACTIVE.
+
+Part 3: Managing Authorization Holds
+- Enhance authorization logic to use the card's available limit, which decreases
+  as transactions are authorized.
+
+Part 4: Final Card Ledger Summary
+- Generate a summary for each card, including its final status, limits, and a
+  list of settled transactions.
+"""
 from collections import defaultdict
+
+# ===================================================================================
+# User's Original Approach
+#
+# This solution works but can be complex. It uses multiple functions that each
+# re-parse and re-process the data. State is calculated in different places and
+# passed between functions, which can be hard to follow and debug.
+# ===================================================================================
 class CardLifeCycle:
     def parse_card_events(self, events: str):
         card_events = defaultdict(list)
@@ -78,6 +118,7 @@ class CardLifeCycle:
                 if event["event"] == "TX_AUTH_REQUEST":
                     amount = int(event["amount"])
                     card_id = event["card_id"]
+                    # Bug: This uses the FINAL status and limit, not the status/limit at the time of the transaction.
                     if card_last_status[card_id] == "ACTIVE" and int(card_limits[card_id]["current_limit"]) > amount:
                         card_limits[card_id]["current_limit"] -= amount
                         authorized.append(id)
@@ -99,10 +140,8 @@ class CardLifeCycle:
         card_events, card_last_status, card_limits, transaction_events = self.parse_card_events(events)
         transaction_information, card_limits, card_last_status, settled_transactions = self.get_transaction_auth_v2(events)
         settled_transactions_for_card = {}
-        print(f"transaciton events {settled_transactions}")
-        print("\n")
         card_summary = {}
-        #print(card_events)
+
         for card_id in card_events.keys():
             events =  card_events[card_id]
             status = card_last_status[card_id]
@@ -119,65 +158,174 @@ class CardLifeCycle:
         for summary in card_summary.values():
             summary["settled_transactions"] = sorted(summary["settled_transactions"])         
                       
-                
         return card_summary                 
+
+# ===================================================================================
+# Optimized, Modular Solution
+#
+# This refactored solution follows the "single timeline" principle. A core
+# private function `_get_final_system_state` processes all events in one
+# chronological pass to build a complete "state" object. The public methods are
+# simple, clean wrappers that just format the data from that central state.
+# This makes the code more efficient, easier to debug, and more robust.
+# ===================================================================================
+class AuthorizationService:
+    """A clean, modular solution for the Card Authorization Service problem."""
+
+    def _parse_and_sort_log(self, log: str) -> list:
+        """Parses the raw log string and sorts all events chronologically."""
+        events = []
+        for line in log.strip().split('&'):
+            if not line:
+                continue
+            try:
+                timestamp, event_type, data_str = line.split(';', 2)
+                data = {k: v for k, v in (item.split('=') for item in data_str.split(';')) if item}
+                events.append({"timestamp": timestamp, "type": event_type, "data": data})
+            except (ValueError, IndexError):
+                continue  # Skip malformed lines
+        
+        return sorted(events, key=lambda e: e["timestamp"])
+
+    def _get_final_system_state(self, log: str) -> dict:
+        """
+        The core processing engine. Iterates through the sorted log once
+        to build a comprehensive final state for the entire system.
+        """
+        # This check prevents re-computing for the same log string (memoization).
+        if hasattr(self, '_cached_state') and self._cached_log == log:
+            return self._cached_state
+            
+        sorted_events = self._parse_and_sort_log(log)
+        
+        # --- State Tracking Dictionaries ---
+        card_info = defaultdict(lambda: {"status": None, "total_limit": 0, "available_limit": 0})
+        auth_results = defaultdict(list)
+        settled_txs = defaultdict(list)
+        tx_to_card_map = {} # Helper to link a settled transaction back to its card
+
+        for event in sorted_events:
+            event_type = event["type"]
+            data = event["data"]
+            card_id = data.get("card_id")
+
+            if event_type == "CARD_CREATED":
+                limit = int(data.get("limit", 0))
+                card_info[card_id]["total_limit"] = limit
+                card_info[card_id]["available_limit"] = limit
+            
+            elif event_type == "CARD_STATUS_CHANGED":
+                if card_id in card_info:
+                    card_info[card_id]["status"] = data.get("status")
+
+            elif event_type == "TX_AUTH_REQUEST":
+                tx_id = data.get("transaction_id")
+                amount = int(data.get("amount", 0))
                 
+                # Authorization Logic uses the card's state *at this moment in time*
+                if card_id in card_info and card_info[card_id]["status"] == "ACTIVE" and card_info[card_id]["available_limit"] >= amount:
+                    auth_results["authorized"].append(tx_id)
+                    card_info[card_id]["available_limit"] -= amount
+                    tx_to_card_map[tx_id] = card_id
+                else:
+                    auth_results["declined"].append(tx_id)
+            
+            elif event_type == "TX_SETTLED":
+                tx_id = data.get("transaction_id")
+                if tx_id in tx_to_card_map:
+                    card_id_for_tx = tx_to_card_map[tx_id]
+                    settled_txs[card_id_for_tx].append(tx_id)
+
+        # Cache the result for efficiency
+        self._cached_log = log
+        self._cached_state = {
+            "card_info": card_info,
+            "auth_results": auth_results,
+            "settled_txs": settled_txs
+        }
+        return self._cached_state
+
+    # --- Public Methods For Each Part ---
+
+    def track_card_lifecycles(self, log: str) -> dict:
+        """Solves Part 1."""
+        state = self._get_final_system_state(log)
+        return {cid: info["status"] for cid, info in state["card_info"].items()}
+
+    def authorize_transactions_simple(self, log: str) -> dict:
+        """Solves Part 2."""
+        state = self._get_final_system_state(log) # We can reuse the state engine
+        # But for this part, the logic is simpler and doesn't use the limit.
+        auth_results = defaultdict(list)
+        card_statuses = {}
+        for event in self._parse_and_sort_log(log): # Reprocess for simpler logic
+            if event['type'] == 'CARD_STATUS_CHANGED':
+                card_statuses[event['data']['card_id']] = event['data']['status']
+            elif event['type'] == 'TX_AUTH_REQUEST':
+                tx_id = event['data']['transaction_id']
+                card_id = event['data']['card_id']
+                if card_statuses.get(card_id) == 'ACTIVE':
+                    auth_results['authorized'].append(tx_id)
+                else:
+                    auth_results['declined'].append(tx_id)
+        return dict(auth_results)
+
+    def authorize_with_holds(self, log: str) -> dict:
+        """Solves Part 3."""
+        state = self._get_final_system_state(log)
+        return dict(state["auth_results"])
+
+    def generate_ledger_summary(self, log: str) -> dict:
+        """Solves Part 4."""
+        state = self._get_final_system_state(log)
+        summary = {}
+        for cid, info in state["card_info"].items():
+            summary[cid] = {
+                "status": info["status"],
+                "total_limit": info["total_limit"],
+                "available_limit": info["available_limit"],
+                "settled_txs": sorted(state["settled_txs"].get(cid, []))
+            }
+        return summary
+        
+
 if __name__ == "__main__":
-    # --- Test Data for Parts 1 & 2 (Simpler Logic) ---
     log_simple = (
         "2025-07-01T10:00:00Z;CARD_CREATED;card_id=card_A;limit=1000&"
         "2025-07-01T10:01:00Z;CARD_STATUS_CHANGED;card_id=card_A;status=ACTIVE&"
         "2025-07-01T10:02:00Z;CARD_CREATED;card_id=card_B;limit=500&"
         "2025-07-01T10:03:00Z;CARD_STATUS_CHANGED;card_id=card_B;status=ACTIVE&"
         "2025-07-01T10:04:00Z;CARD_STATUS_CHANGED;card_id=card_B;status=INACTIVE&"
-        "2025-07-01T10:05:00Z;TX_AUTH_REQUEST;transaction_id=tx_1;card_id=card_A;amount=100&" # Should be authorized
-        "2025-07-01T10:06:00Z;TX_AUTH_REQUEST;transaction_id=tx_2;card_id=card_B;amount=100"  # Should be declined
+        "2025-07-01T10:05:00Z;TX_AUTH_REQUEST;transaction_id=tx_1;card_id=card_A;amount=100&"
+        "2025-07-01T10:06:00Z;TX_AUTH_REQUEST;transaction_id=tx_2;card_id=card_B;amount=100"
     )
 
-    # --- Test Data for Parts 3 & 4 (Complex State Logic) ---
     log_complex = (
         "2025-07-01T10:00:00Z;CARD_CREATED;card_id=card_X;limit=1000&"
         "2025-07-01T10:01:00Z;CARD_STATUS_CHANGED;card_id=card_X;status=ACTIVE&"
         "2025-07-01T10:02:00Z;CARD_CREATED;card_id=card_Y;limit=2000&"
-        "2025-07-01T10:05:00Z;TX_AUTH_REQUEST;transaction_id=tx_A;card_id=card_X;amount=800&"  # Authorized, available limit becomes 200
+        "2025-07-01T10:05:00Z;TX_AUTH_REQUEST;transaction_id=tx_A;card_id=card_X;amount=800&"
         "2025-07-01T10:03:00Z;CARD_STATUS_CHANGED;card_id=card_Y;status=ACTIVE&"
-        "2025-07-01T10:06:00Z;TX_AUTH_REQUEST;transaction_id=tx_B;card_id=card_X;amount=300&"  # Declined, exceeds available limit
+        "2025-07-01T10:06:00Z;TX_AUTH_REQUEST;transaction_id=tx_B;card_id=card_X;amount=300&"
         "2025-07-01T10:08:00Z;TX_SETTLED;transaction_id=tx_A&"
-        "2025-07-01T10:07:00Z;TX_AUTH_REQUEST;transaction_id=tx_C;card_id=card_Y;amount=1500" # Authorized
+        "2025-07-01T10:07:00Z;TX_AUTH_REQUEST;transaction_id=tx_C;card_id=card_Y;amount=1500"
     )
 
-    # Instantiate your solution class
-    service = CardLifeCycle() # Replace with your class name
+    # Use the cleaner, optimized solution for testing
+    service = AuthorizationService()
 
-    # --- Part 1 ---
     print("## Part 1: Card Lifecycle Tracking ##")
-    # Expected: A map like {'card_A': 'ACTIVE', 'card_B': 'INACTIVE'}
-    print(dict(service.get_last_known_card_status(log_simple)))
+    print(service.track_card_lifecycles(log_simple))
     print("-" * 50)
 
-
-    # --- Part 2 ---
     print("## Part 2: Simple Transaction Authorization ##")
-    # Expected: A map like {'authorized': ['tx_1'], 'declined': ['tx_2']}
-    print(service.get_transaction_auth(log_simple))
+    print(service.authorize_transactions_simple(log_simple))
     print("-" * 50)
 
-
-    # --- Part 3 ---
     print("## Part 3: Managing Authorization Holds ##")
-    # Expected: A map like {'authorized': ['tx_A', 'tx_C'], 'declined': ['tx_B']}
-    print(service.get_transaction_auth_v2(log_complex)[0])
+    print(service.authorize_with_holds(log_complex))
     print("-" * 50)
 
-
-    # --- Part 4 ---
     print("## Part 4: Final Card Ledger Summary ##")
-    # Expected: A map mapping card_id to its summary.
-    # For card_X: {'status': 'ACTIVE', 'total_limit': 1000, 'available_limit': 200, 'settled_txs': ['tx_A']}
-    # For card_Y: {'status': 'ACTIVE', 'total_limit': 2000, 'available_limit': 500, 'settled_txs': []}
-    print(service.get_summary(log_complex))
+    print(service.generate_ledger_summary(log_complex))
     print("-" * 50)
-
-               
-           
-            
