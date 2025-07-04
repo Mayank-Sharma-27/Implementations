@@ -44,8 +44,8 @@ class IdempotentLayer:
             if idempotency_key_info[itempotent_key][0]["request_id"] != request_id:
                mappings[request_id] = "DUPLICATE" 
             else:
-               mappings[request_id] = "SUCCEEDED"  
-        
+               mappings[request_id] = "SUCCEEDED" 
+                          
         return mappings          
 if __name__ == "__main__":
                              
