@@ -1,3 +1,26 @@
+"""
+Problem 3: API Rate Limiter (Leaky Bucket)
+Story
+You are implementing a "leaky bucket" rate limiter to protect a critical API endpoint. Requests of different "sizes" add "water" to a bucket. The bucket leaks at a constant rate. A request is rejected if adding its size would cause the bucket to overflow.
+
+Input Format
+A log of API requests separated by ~. Format: timestamp;api_key;request_id;request_size.
+Initial parameters: bucket_capacity, leak_rate_per_second.
+The Task
+Simple Request Counter: Implement a basic rate limiter that only counts the number of requests in the last 60 seconds per api_key.
+Leaky Bucket Implementation: Implement the core leaky bucket logic. At the time of each request, calculate how much has leaked, then determine if the new request fits.
+Request Outcomes: Process the log chronologically and return a map of each request_id to its outcome: ACCEPTED or REJECTED.
+Per-Key Summary: Generate a summary report for each api_key, including total requests received, accepted, and rejected.
+Sample Input
+requests_log = "2025-01-01T10:00:00Z;key_A;req_1;10~2025-01-01T10:00:00Z;key_A;req_2;15~2025-01-01T10:00:01Z;key_A;req_3;20"
+bucket_capacity = 30
+leak_rate_per_second = 10
+
+
+Make sure to sort the events before doing anything
+
+"""
+
 from collections import defaultdict
 from datetime import datetime
 class LeakyBucket:
