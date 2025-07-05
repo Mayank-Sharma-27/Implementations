@@ -5,8 +5,6 @@ class SubscriptionEngine:
     def parse_events(self, logs: str) -> dict: 
         customer_events = defaultdict(dict)
         event_logs = logs.split("&")
-        
-        monthly_events = defaultdict(list)
         for event_log in event_logs:
             #print(event_log.split(";"))
             timestamp, customer_id, event_type, plan_id = event_log.split(";")
