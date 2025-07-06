@@ -36,14 +36,14 @@ class SubscriptionTier:
                custmer_subs[customer_id][month]["project_tier"] = ""
             
             usage_amount = custmer_subs[customer_id][month]["usage_amount"] + usage
-            
-            custmer_subs[customer_id][month]["usage_amount"] = usage_amount
-            if usage_amount > tiers[0] and usage_amount < tiers[1]:
-                custmer_subs[customer_id][month]["subscription_tier"] = "Bronze"
-            elif usage_amount > tiers[1] and usage_amount < tiers[2]:
-                custmer_subs[customer_id][month]["subscription_tier"] = "Silver"
-            else:
+                
+            # Assuming tiers = [0, 1000, 5000]
+            if usage_amount >= tiers[2]:  # 5000+
                 custmer_subs[customer_id][month]["subscription_tier"] = "Gold"
+            elif usage_amount >= tiers[1]: # 1000-4999
+                custmer_subs[customer_id][month]["subscription_tier"] = "Silver"
+            else: # 0-999
+                custmer_subs[customer_id][month]["subscription_tier"] = "Bronze"    
         
         return custmer_subs
     
