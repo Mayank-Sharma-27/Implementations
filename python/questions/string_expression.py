@@ -1,3 +1,63 @@
+"""
+Screening (1 hour)
+After basic introduction from both the sides, interview started with DSA based question which I had to code on the Hackerrank link which the interviewer shared.
+
+Question - Bracket Expansion
+
+You are given a string expression which consists of several comma separated tokens 
+enclosed within opening ('{') and closing ('}') curly braces.
+The string expression might or might not have a prefix before opening curly brace('{') and
+a suffix after closing curly brace ('}').
+You have to return a list of strings as output for each comma separated item as shown below in the examples. 
+
+Example 1: 
+Input = "/2022/{jan,feb,march}/report"
+Output = "/2022/jan/report"
+		 "/2022/feb/report"
+		 "/2022/march/report"
+		 
+Example 2: 
+Input = "over{crowd,eager,bold,fond}ness"
+Output = "overcrowdness"
+		 "overeagerness"
+		 "overboldness"
+		 "overfondness"
+		 
+Example 3: 
+Input = "read.txt{,.bak}"
+Output = "read.txt"
+		 "read.txt.bak"
+Follow-up
+
+If there are less than 2 tokens enclosed within curly braces or incorrect expression 
+(eg. opening and closing braces not present, only opening brace present, 
+closing brace present before opening brace etc) return the output same as input
+
+Example 1:
+Input: sun{mars}rotation
+Output: sun{mars}rotation
+
+Example 2:
+Input: minimum{}change
+Output: minimum{}change
+
+Example 3 (Incorrect Input):
+Input: hello-world
+Output: hello-world
+
+Example 4 (Incorrect Input):
+Input: hello-{-world
+Output: hello-{-world
+
+Example 5 (Incorrect Input):
+Input: hello-}-weird-{-world
+Output: hello-}-weird-{-world
+
+
+Leetcode link : https://leetcode.com/discuss/post/5341224/stripe-backend-engineer-bangalore-jun-20-w2jc/
+
+"""
+
 class StringExpression:
     def get_output(self, expression: str) :
         try:
