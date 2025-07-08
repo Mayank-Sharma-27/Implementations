@@ -18,7 +18,7 @@ policy = {"initial_delay_seconds": 60, "max_retries": 3}
 response_log = "2025-08-01T12:00:00Z;evt_A;503&2025-08-01T12:01:00Z;evt_A;503&2025-08-01T12:02:00Z;evt_B;200&2025-08-01T12:03:00Z;evt_A;200"
 """
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 class WebhookDelivery:
     def parse_events(self, logs: str) -> dict:
         response_logs_tokens = logs.split("&")
@@ -52,10 +52,11 @@ class WebhookDelivery:
         
         for id, events in events_mapping.items():
             initial_status = events[0]["http_status"]
+            print(f"{events[0]} : {id}")
             if initial_status != 200:
-               event_initial_status_map[id] = "DELIVERED"
+               event_initial_status_map[id] = "FAILED"
             else:
-               event_initial_status_map[id] = "FAILED"  
+               event_initial_status_map[id] = "DELIVERED"  
         
         return event_initial_status_map
     
@@ -68,9 +69,12 @@ class WebhookDelivery:
             initial_status = events[0]["http_status"]
             if initial_status != 200:
                time = events[0]["time"]
+               current_delay = int(policy["initial_delay_seconds"]) # Start with the initial delay
+               time = events[0]["time"]    
                for i in range (0, max_retries):
-                   time =  time + datetime.timedelta(seconds=delay)
+                   time =  time + timedelta(seconds=current_delay)
                    events_to_retry_schdule[id].append(time)
+                   current_delay = current_delay * 2
         
         return events_to_retry_schdule
     
@@ -83,14 +87,92 @@ class WebhookDelivery:
             event_index = len(events) -1
             initial_status = events[event_index]["http_status"]
             if initial_status != 200:
-               event_final_status_map[id] = "DELIVERED"
+               event_final_status_map[id] = "FAILED"
             else:
-               event_final_status_map[id] = "FAILED"  
+               event_final_status_map[id] = "DELIVERED"  
         
         return event_final_status_map
     
     def get_unreliable_url(self, logs: str, events_to_send: dict) -> dict:
+        events_mapping = self.parse_events(logs)
         
+        unreliable_events = []
+        events_mapping_url = {}
+        for event in events_to_send:
+            token = event.split(";")
+            id = token[0].strip()
+            url = token[1].strip()
+            events_mapping_url[id] = url
+           
+        
+        for id, events in events_mapping.items():
+            consecutive = 0
+            last_event = None
+            for event in events:
+                status = event["http_status"]
+                if status != 200:
+                    consecutive += 1
+                else:
+                    consecutive = 0
+                if consecutive == 3:
+                   unreliable_events.append(events_mapping_url[id])        
+                          
+                
+        return unreliable_events
+
+if __name__ == "__main__":
+    # --- Test Data ---
+    events_to_send = [
+        "evt_A;http://endpoint.com/a",  # Will fail, then succeed
+        "evt_B;http://endpoint.com/b",  # Will succeed on the first try
+        "evt_C;http://endpoint.com/a"   # Will fail all retries
+    ]
+    
+    policy = {"initial_delay_seconds": 60, "max_retries": 3}
+    
+    response_log = (
+        "2025-08-01T12:00:00Z;evt_A;503&"  # evt_A: First attempt fails
+        "2025-08-01T12:01:00Z;evt_A;503&"  # evt_A: First retry fails
+        "2025-08-01T12:02:00Z;evt_B;200&"  # evt_B: First attempt succeeds
+        "2025-08-01T12:03:00Z;evt_A;200&"  # evt_A: Second retry succeeds
+        "2025-08-01T12:10:00Z;evt_C;500&"  # evt_C: First attempt fails
+        "2025-08-01T12:11:00Z;evt_C;500&"  # evt_C: First retry fails
+        "2025-08-01T12:13:00Z;evt_C;500&"  # evt_C: Second retry fails
+        "2025-08-01T12:17:00Z;evt_C;503"   # evt_C: Third retry fails
+    )
+
+    # Instantiate your solution class
+    simulator = WebhookDelivery() # Replace with your class name
+
+    # --- Part 1 ---
+    print("## Part 1: Initial Delivery Status ##")
+    # Expected: A map like {'evt_A': 'FAILURE', 'evt_B': 'SUCCESS', 'evt_C': 'FAILURE'}
+    print(simulator.get_initial_status(response_log))
+    print("-" * 50)
+
+
+    # --- Part 2 ---
+    print("## Part 2: Retry Schedule ##")
+    # Expected: For evt_A (failed at 12:00:00), schedule would be [12:01:00, 12:03:00, 12:07:00]
+    # {'evt_A': ['2025-08-01T12:01:00Z', '2025-08-01T12:03:00Z', ...], 'evt_C': [...]}
+    print(dict(simulator.get_retry_schedule(response_log, policy)))
+    print("-" * 50)
+
+
+    # --- Part 3 ---
+    print("## Part 3: Final Event Status ##")
+    # Expected: {'evt_A': 'DELIVERED', 'evt_B': 'DELIVERED', 'evt_C': 'FAILED'}
+    print(simulator.get_final_event_status(response_log))
+    print("-" * 50)
+
+
+    # --- Part 4 ---
+    print("## Part 4: Unreliable Endpoints ##")
+    # Expected: A list containing 'http://endpoint.com/a' because evt_C failed more than 3 times in a row.
+    # ['http://endpoint.com/a']
+    print(simulator.get_unreliable_url( response_log, events_to_send))
+    print("-" * 50)    
+                   
                    
             
               
