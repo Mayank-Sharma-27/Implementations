@@ -547,3 +547,152 @@ Part 1: Parse all events and group them by shipment ID, normalize the statuses, 
 Part 2: Generate a user-friendly status report: one section per shipment, with carrier and sorted status history.
 Part 3: Remove duplicate event entries (identical event strings), then parse and sort as in Part 1.
 Part 4: From the unique events, get the most recent status per shipment based on timestamp. 
+
+
+## Question 27
+
+**Question file:** flatten\_json.py
+Stripe-Style Problem: JSON Event Flattening
+
+Stripe logs API activity in a deeply nested JSON structure. You are building a log parser that flattens the nested structure into dot-delimited key-value pairs.
+
+**Input:** A string containing a JSON object (nested dictionaries and lists allowed).
+
+---
+
+Part 1 – Flattening:
+
+* Write a function to flatten any nested JSON. Keys should be dot-separated, with list indices in brackets.
+
+Example:
+
+```json
+{
+  "user": {
+    "id": 123,
+    "metadata": {
+      "plan": "gold"
+    }
+  },
+  "events": [
+    {"type": "login"},
+    {"type": "payment", "amount": 500}
+  ]
+}
+```
+
+Should become:
+
+```json
+{
+  "user.id": 123,
+  "user.metadata.plan": "gold",
+  "events[0].type": "login",
+  "events[1].type": "payment",
+  "events[1].amount": 500
+}
+```
+
+---
+
+Part 2 – Field Filter:
+
+* Allow the function to take a list of fields to extract. Only return those flattened keys.
+
+Part 3 – Schema Validation:
+
+* Write a method that checks whether all required fields exist in the flattened result.
+
+## Question 28
+
+**Question file:** log\_diff.py
+Stripe-Style Problem: Event Log Reconciliation
+
+You’re given two logs: `internal_log`, `external_log`, both as strings where each event is formatted as:
+`event_id;timestamp;amount`
+
+---
+
+Part 1 – Matching Events:
+
+* Return a list of event\_ids that exist in one log but not the other.
+
+Part 2 – Mismatched Fields:
+
+* If both logs contain the same `event_id`, but the `amount` differs, include it in a `mismatched` report.
+
+Part 3 – Timestamp Drift:
+
+* Detect events where timestamps differ by more than 5 minutes. Return these as potential clock sync issues.
+
+## Question 29
+
+**Question file:** csv\_summary.py
+Stripe-Style Problem: CSV-Based Invoice Aggregator
+
+You are given a CSV string representing invoice data with the format:
+`invoice_id,merchant_id,currency,amount,timestamp`
+
+---
+
+Part 1 – Totals per Merchant:
+
+* Return total revenue per merchant per currency.
+
+Part 2 – Daily Aggregates:
+
+* Return per-day revenue totals for a specified currency.
+
+Part 3 – Range Filter:
+
+* Add support for filtering only rows between a given start\_date and end\_date.
+
+Part 4 – Currency Conversion:
+
+* Add support to convert to USD using a provided rate map `{ "EUR": 1.1, "CAD": 0.8 }`.
+
+## Question 30
+
+**Question file:** usage\_duration.py
+Stripe-Style Problem: Session Duration Calculator
+
+You’re given a log of usage events (login/logout) per user:
+`timestamp;user_id;event_type`
+Where event\_type is either `LOGIN` or `LOGOUT`.
+
+---
+
+Part 1 – Duration per Session:
+
+* For each user, calculate the duration of each session (LOGOUT - LOGIN).
+
+Part 2 – Monthly Usage Report:
+
+* Aggregate total usage time per user per month.
+
+Part 3 – Abnormal Sessions:
+
+* Detect users with sessions longer than 24 hours (likely caused by missing logouts).
+
+## Question 31
+
+**Question file:** pagination\_simulator.py
+Stripe-Style Problem: Paginated API Simulator
+
+Stripe returns API results in pages with a `next_cursor`. You need to simulate paginated access.
+
+You’re given a large list of transaction records (list of dicts), a page size, and an optional cursor.
+
+---
+
+Part 1 – Page Fetch:
+
+* Implement a function that returns one page of results and the next cursor.
+
+Part 2 – Filtering:
+
+* Support filtering results by a field (e.g., status = “SUCCEEDED”).
+
+Part 3 – Cursor Resumption:
+
+* Support restarting from a given cursor (index-based or record-based).
