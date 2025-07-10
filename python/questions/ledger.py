@@ -41,97 +41,107 @@ from collections import defaultdict
 
 class Ledger:
     
-    def parse_events(self, log: str) -> dict :
-        parsed_events = []
-        for line in log.strip().split("|"):
-            if not line.strip():
-                continue
-            
-            timestamp, t_id, a_id, event, amount, status, linked_id = line.split(";")
-            parsed_events.append({
+    def parse_events(self, logs: str) -> dict:
+        log_tokens = logs.split("|")
+        
+        successful_account_transactions = defaultdict(list)
+        pending_payout_transactions = defaultdict(int)
+        pending_transactions = []
+        account_balance =  defaultdict(lambda: {"available_balance":0, "total_balance": 0})
+        events = []
+        successful_account_transactions_to_amount = {}
+        transaction_to_account_mappings = {}
+        
+        for log_token in log_tokens:
+            timestamp,transaction_id,account_id,event_type,amount,status,linked_id = log_token.split(";")
+            events.append({
                 "timestamp": timestamp,
-                "transaction_id": t_id,
-                "account": a_id,
-                "event": event,
-                "amount": int(amount),
+                "transaction_id": transaction_id,
+                "account_id": account_id,
+                "event_type": event_type,
+                "amount" : int(amount),
                 "status": status,
                 "linked_id": linked_id
             })
-        return sorted(parsed_events, key=lambda p : p["timestamp"])
-    
-    def _get_final_ledger_state(self, log: str) -> dict:
-        sorted_events = self.parse_events(log)
+            transaction_to_account_mappings[transaction_id] = account_id
+        events = sorted(events, key=lambda p:p["timestamp"])
         
-        balances = defaultdict(lambda : {"total_balance": 0, "available_balance" : 0})
-        
-        pending_payouts = {}
-        cleared_transactions = defaultdict(set)
-        payout_statements = defaultdict(list)
-        
-        for event in sorted_events:
-            acct_id = event["account"]
-            tx_id = event["transaction_id"]
-            status = event["status"]
-            tx_type = event["event"]
-            amount = event["amount"]
-            
-            if tx_type == "PAYOUT":
-                if status == "PENDING":
-                    pending_payouts[tx_id] = balances[acct_id]["available_balance"]
-                elif status == "SUCCEEDED":
-                    payout_amount =  pending_payouts.get(tx_id, amount)
-                    if payout_amount > 0:
-                        balances[acct_id]["total_balance"] -= payout_amount
-                        balances[acct_id]["available_balance"] -= payout_amount
-                        statement_txs = []
-                        for prev_event in sorted_events:
-                            if prev_event["timestamp"] >= event["timestamp"]:
-                                break
-                            if (prev_event["account"] == acct_id and
-                                prev_event["status"] == "SUCCEEDED" and
-                                prev_event["event"] != "PAYOUT" and
-                                prev_event["transaction_id"] not in cleared_transactions[acct_id]):
-                                
-                                statement_txs.append(prev_event["transaction_id"])
-                                cleared_transactions[acct_id].add(prev_event["transaction_id"])
-                        payout_statements[tx_id] = statement_txs
-                continue#
-            
-            if status == "FAILED":
+        for event in events:
+            account_id = event["account_id"]
+            event_type= event["event_type"]
+            amount= event["amount"]
+            status =  event["status"]
+            linked_id = event["linked_id"]
+            transaction_id = event["transaction_id"]
+            if status == "PENDING":
+                if event_type == "CHARGE":
+                    account_balance[account_id]["total_balance"] += amount
+                    pending_transactions.append(transaction_id)
+                elif event_type == "REFUND":
+                    account_balance[account_id]["total_balance"] += amount
+                elif event_type == "FEE":
+                    account_balance[account_id]["total_balance"] -= amount
+                elif event_type == "PAYOUT":
+                     pending_payout_transactions[transaction_id] = account_balance[account_id]["available_balance"]                     
+            elif status == "SUCCEEDED":
+                if event_type == "CHARGE":
+                    if transaction_id not in pending_transactions:
+                        account_balance[account_id]["total_balance"] += amount
+                    else:
+                        pending_transactions.remove(transaction_id)    
+                    account_balance[account_id]["available_balance"] += amount
+                    successful_account_transactions_to_amount[transaction_id] = amount
+                elif event_type == "REFUND":
+                    amount_to_refund = successful_account_transactions_to_amount[linked_id]
+                    account_balance[account_id]["total_balance"] -= amount_to_refund
+                    account_balance[account_id]["available_balance"] -= amount_to_refund
+                elif event_type == "FEE":
+                    account_balance[account_id]["total_balance"] -= amount
+                    account_balance[account_id]["available_balance"] -= amount
+                elif event_type == "PAYOUT":
+                    if transaction_id in pending_payout_transactions:
+                        amount_to_payout = pending_payout_transactions[transaction_id]
+                        account_balance[account_id]["available_balance"] -= amount_to_payout
+                        account_balance[account_id]["total_balance"] -= amount_to_payout
+                        del pending_payout_transactions[transaction_id] 
+                successful_account_transactions[account_id].append(transaction_id)        
+            else:
                 continue
             
-            effect = 1 if tx_type == "CHARGE" else -1
+        return  {
+            "successful_account_transactions": successful_account_transactions,
+            "account_balance": account_balance,
+            "transaction_to_account_mappings": transaction_to_account_mappings
             
-            if status == "SUCCEEDED":
-                balances[acct_id]["total_balance"] += amount * effect
-                balances[acct_id]["available_balance"] += amount * effect
-            elif status == "PENDING":
-                balances[acct_id]["total_balance"] += amount * effect
-
-        return {"balances": balances, "statements": payout_statements}        
-        
-    def calculate_final_balances(self, log: str) -> dict:
-        """Solves Part 1."""
-        # This part can be solved by running the full ledger and extracting one piece of it.
-        # In a real system, you might optimize this, but for the interview, it demonstrates cohesion.
-        final_state = self._get_final_ledger_state(log)
-        final_balances = {
-            acct_id: data["available_balance"]
-            for acct_id, data in final_state["balances"].items()
-        }
-        return final_balances
-
-    def get_all_balances(self, log: str) -> dict:
-        """Solves Parts 2 & 3."""
-        final_state = self._get_final_ledger_state(log)
-        # Convert defaultdict to a regular dict for clean output
-        return {acct_id: data for acct_id, data in final_state["balances"].items()}
-
-    def generate_payout_statement(self, log: str, payout_id: str) -> list:
-        """Solves Part 4."""
-        final_state = self._get_final_ledger_state(log)
-        return final_state["statements"].get(payout_id, [])        
+        }   
     
+    def calculate_final_balances(self, log: str) -> dict:
+        events = self.parse_events(log)
+        account_balances = events["account_balance"]
+        account_balance_mapping = defaultdict(int)
+        for key, account_balance in account_balances.items():
+            account_balance_mapping[key] = account_balance["available_balance"]
+        return account_balance_mapping
+    
+    def get_all_balances(self, log: str) -> dict:
+        events = self.parse_events(log)
+        account_balances = events["account_balance"]
+        return account_balances
+    
+    def generate_payout_statement(self, log: str, payout_id: str) -> dict:
+        events = self.parse_events(log)
+        transaction_to_account_mappings = events["transaction_to_account_mappings"]
+        successful_account_transactions = events["successful_account_transactions"]
+        successful_transactions_before_payout = []
+        account_id = transaction_to_account_mappings[payout_id]
+        for transaction in successful_account_transactions[account_id]:
+            if transaction == payout_id:
+                return successful_transactions_before_payout
+            successful_transactions_before_payout.append(transaction)
+            
+        return successful_transactions_before_payout
+                    
+
 if __name__ == "__main__":
  
     log = (
@@ -153,7 +163,7 @@ if __name__ == "__main__":
     
     print("--- Part 1 Results ---")
     ledger = Ledger()
-    print(ledger.calculate_final_balances(log))  
+    print(dict(ledger.calculate_final_balances(log)))  
     print("--- Part 2")
     print(dict(ledger.get_all_balances(log)))
     print("--- Part 3")

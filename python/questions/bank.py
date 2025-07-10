@@ -34,173 +34,126 @@ from collections import defaultdict
 
 class Bank:
     
-    def parse_events(self, deposit_data: str, invoices: str) -> dict:
-        parsed_data = {}
+    def parse_events(self, deposits: str, invoices : list[str]) -> dict:
+        partially_paid_invoices = []
+        overpaid_invoices = []
+        fully_paid_invoices = []
+        unpaid_invoices = []
+       
+        invoices_infomation = {} 
+        deposit_tokens = deposits.split("|")
+        deposit_id =  deposit_tokens[0]
+        customer_balance = defaultdict(lambda: {"balance_due":0})
+        customer_credit = defaultdict(int)
+        customer_invoice_mapping = defaultdict(list)
+        for token in deposit_tokens[1:]:
+           t = token.split(":") 
+           
+           customer_id = t[0]
+           amount_paid = int(t[1])
+           invoice_id = t[2]
+           invoices_infomation[invoice_id] = {
+               "customer_id": customer_id,
+               "amount_paid": amount_paid
+           }
+           customer_invoice_mapping[customer_id].append(invoice_id)
         
-        deposit_data_events = []
-        main_parts = deposit_data.split('|')
-        id = main_parts[0]
-        for data in main_parts[1:]:
-            if not data:
-                continue
-            
-            c_id, amount, invoice_id = data.split(":")
-            deposit_data_events.append({
-                "id": id,
-                "c_id": c_id,
-                "amount": int(amount),
-                "invoice_id": invoice_id
-            })
-        invoices_events = []
         
-        for data in invoices:
-            invoice_id, c_id, amount = data.split(",")
-            invoices_events.append({
-               "invoice_id": invoice_id,
-               "c_id": c_id,
-               "amount": int(amount)
-            })
-        parsed_data["deposit_data_events"] = deposit_data_events
-        parsed_data["invoices"] = invoices_events 
-        return parsed_data
-    
-    def get_invoice_info_amounts(self, deposit_data: str, invoices: str) -> list:
-        parsed_data = self.parse_events(deposit_data, invoices)
-        paid_invoices = []
-        for invoice in parsed_data["invoices"]:
-            id =  invoice["invoice_id"]
-            c_id = invoice["c_id"]
-            invoice_amount = invoice["amount"]
+        for invoice in invoices:
+            invoice_tokens = invoice.split(",")
+            invoice_id = invoice_tokens[0]
+            customer_id = invoice_tokens[1]
+            amount_due = int(invoice_tokens[2])
             
-            for deposit_data_event in parsed_data["deposit_data_events"]:
-                deposit_id  = deposit_data_event["id"]
-                amount = deposit_data_event["amount"]
-                invoice_id = deposit_data_event["invoice_id"]
-                if amount == invoice_amount and invoice_id == id: 
-                    paid_invoices.append({
-                        "deposit_id": deposit_id,
-                        "c_id": c_id,
-                        "amount": int(amount),
-                        "invoice_id": invoice_id,
-                        "status": "PAID"
-                    })
-                elif amount < invoice_amount and invoice_id == id:
-                    amount_remaining = invoice_amount - amount 
-                    paid_invoices.append({
-                        "deposit_id": deposit_id,
-                        "c_id": c_id,
-                        "amount": int(amount),
-                        "invoice_id": invoice_id,
-                        "status": "PARTIALLY_PAID",
-                        "amount_remaining": amount_remaining 
-                    })
-                elif amount > invoice_amount and invoice_id == id:
-                    over_paid_amount = amount - invoice_amount 
-                    paid_invoices.append({
-                        "deposit_id": deposit_id,
-                        "c_id": c_id,
-                        "amount": int(amount),
-                        "invoice_id": invoice_id,
-                        "status": "PAID",
-                        "over_paid_amount": over_paid_amount 
-                    })
-                                          
-        
-        return paid_invoices
-        
-    def get_fully_paid_info(self, deposit_data: str, invoices: str) -> list[str]:
-        invoice_info = self.get_invoice_info_amounts(deposit_data, invoices)
-        lines = []
-        for invoice in invoice_info:
-            status = invoice["status"]
-            deposit_id = invoice["deposit_id"]
-            invoice_id = invoice["invoice_id"]
-            amount = invoice["amount"]
-            c_id = invoice["c_id"]
-            
-            if status == "PAID":
-                lines.append(f"Applied payment from deposit {deposit_id}, to fully pay invoice {invoice_id}, for customer {c_id} ({amount})")
-            
-        return "\n".join(lines) 
-    
-    def get_payments(self, deposit_data: str, invoices: str) -> dict:
-        invoice_info = self.get_invoice_info_amounts(deposit_data, invoices)
-    
-        ans = {}
-        for payment in invoice_info:
-            invoice_id = payment["invoice_id"]
-            
-            status = payment["status"]
-            if status == "PARTIALLY_PAID": 
-                amount_remaining = payment["amount_remaining"]
-                ans[invoice_id] = {"status": "PARTIALLY_PAID", "amount_remaining": amount_remaining}
+            if invoices_infomation.get(invoice_id) is not None:
+               invoice_info = invoices_infomation[invoice_id]
+               if invoice_info["amount_paid"] == amount_due:
+                  fully_paid_invoices.append(invoice_id)
+               elif invoice_info["amount_paid"] > amount_due:
+                   over_paid_amount = invoice_info["amount_paid"] - amount_due
+                   overpaid_invoices.append({
+                       "invoice_id": invoice_id,
+                       "overpaid_amount" : over_paid_amount,
+                       "customer_id": customer_id
+                   })
+                   customer_credit[customer_id] += over_paid_amount
+               else:
+                   balance_due = amount_due - invoice_info["amount_paid"]
+                   partially_paid_invoices.append({
+                       "invoice_id": invoice_id,
+                       "balance_due" : balance_due
+                   })
+                   customer_balance[customer_id]["balance_due"] += balance_due
             else:
-                ans[invoice_id] = {"status": "PAID"}          
-        all_invoices = self.parse_events(deposit_data, invoices)["invoices"]
-        for invoice in all_invoices:
-            invoice_id = invoice["invoice_id"]
-            amount = int(invoice["amount"])
-            if ans.get(invoice_id) is None:
-                ans[invoice_id] = {"status": "UNPAID", "amount_remaining":amount}
-            
-                
+                balance_due = amount_due
+                unpaid_invoices.append({
+                       "invoice_id": invoice_id,
+                       "balance_due" : balance_due,
+                       "customer_id": customer_id
+                   }) 
+                customer_balance[customer_id]["balance_due"] += balance_due
+        
+            updated_unpaid = []
+        for unpaid in unpaid_invoices:
+                invoice_id = unpaid["invoice_id"]
+                customer_id = unpaid["customer_id"]
+                balance_due = unpaid["balance_due"]
+                credit = customer_credit[customer_id]
+
+                if credit >= balance_due:
+                    customer_credit[customer_id] -= balance_due
+                    updated_unpaid.append({"invoice_id": invoice_id, "balance_due": 0, "status": "PAID"})
+                elif credit > 0:
+                    unpaid_balance = balance_due - credit
+                    customer_credit[customer_id] = 0
+                    updated_unpaid.append({"invoice_id": invoice_id, "balance_due": unpaid_balance, "status": "PARTIALLY_PAID"})
+                    customer_balance[customer_id]["balance_due"] = unpaid_balance
+                else:
+                    updated_unpaid.append({"invoice_id": invoice_id, "balance_due": balance_due, "status": "UNPAID"})
+        
+               
+        
+        return {"customer_balance" : customer_balance, "overpaid_invoices": overpaid_invoices, "partially_paid_invoices": partially_paid_invoices,
+                "fully_paid_invoices": fully_paid_invoices, "unpaid_invoices": updated_unpaid}
+    
+    def get_fully_paid_info(self, deposits: str, invoices : list[str]) -> dict:
+        invoice_info = self.parse_events(deposits, invoices)
+        fully_paid_invoices = invoice_info["fully_paid_invoices"]
+        ans = {}
+        for invoice_id in fully_paid_invoices:
+            ans[invoice_id] = "PAID"
+        
         return ans
     
-    def get_over_payments_and_others(self, deposit_data: str, invoices: str) -> list:
-        ans = []
-        
-        
-        payments = self.get_payments(deposit_data, invoices)
-        invoice_info = self.get_invoice_info_amounts(deposit_data, invoices)
-        ans.append(payments)
-        credit_informations = {}
-        
-        for payment in invoice_info:
-            c_id = payment["c_id"]
-            status = payment["status"] 
-            
-            if payment.get("over_paid_amount") is not None:
-               over_paid_amount = payment["over_paid_amount"]
-               credit_informations[c_id] = {"credit_balance": over_paid_amount} 
-        
-        ans.append(credit_informations)
-        
-        return ans           
+    def get_payments(self, deposits: str, invoices : list[str]) -> dict:
+        invoice_info = self.parse_events(deposits, invoices)
+        partially_paid_invoices = invoice_info["partially_paid_invoices"]
+        return partially_paid_invoices
     
-    def _get_auto_matic_credit_application(self, deposit_data: str, invoices: str) -> list:
-        credit_informations = self.get_over_payments_and_others(deposit_data, invoices)
-        all_invoices = self.parse_events(deposit_data, invoices)["invoices"]
-        
-        for invoice in all_invoices:
-            
-            invoice_id = invoice_id = invoice["invoice_id"]
-            c_id = invoice["c_id"]
-            if c_id not in credit_informations[1].keys(): 
-                continue
-            
-            pending_invoice = credit_informations[0][invoice_id]
-            if pending_invoice["status"] == "PAID":
-                continue
-            
-            
-            if pending_invoice["status"] == "UNPAID" or pending_invoice["status"] == "PARTIALLY_PAID":
-                customer_credit = credit_informations[1][c_id]["credit_balance"]
-                
-               
-                if pending_invoice["amount_remaining"] <= customer_credit:
-                   pending_invoice["status"] = "PAID"
-                  
-                   customer_credit = customer_credit - pending_invoice["amount_remaining"]
-                   del pending_invoice["amount_remaining"]
-                   credit_informations[1][c_id]["credit_balance"] = customer_credit
-                else:
-                   pending_invoice["amount_remaining"] = pending_invoice["amount_remaining"] - customer_credit
-                   customer_credit = 0     
-                   credit_informations[1][c_id]["credit_balance"] = 0
-                   pending_invoice["status"] = "PARTIALLY_PAID"
-        
-        return credit_informations           
-                
+    def get_over_payments_and_others(self, deposits: str, invoices : list[str]) -> dict:
+        invoice_info = self.parse_events(deposits, invoices)
+        overpaid_invoices = invoice_info["overpaid_invoices"]
+       
+        return overpaid_invoices  
+                          
+    def get_invoices_status(self, deposits: str, invoices: list[str]) -> dict:
+        invoice_info = self.parse_events(deposits, invoices)
+        status_map = {}
+
+        for key in invoice_info["partially_paid_invoices"]:
+            status_map[key["invoice_id"]] = "PARTIALLY_PAID"
+        for key in invoice_info["overpaid_invoices"]:
+            status_map[key["invoice_id"]] = "PAID"
+        for key in invoice_info["fully_paid_invoices"]:
+            status_map[key] = "PAID"
+        for key in invoice_info["unpaid_invoices"]:
+            status_map[key["invoice_id"]] = key["status"]
+
+        return {
+            "invoices": status_map,
+            "customer_balance": invoice_info["customer_balance"]
+        }          
+                                 
 if __name__ == "__main__":
     # --- Part 1 Test Data ---
     deposit_p1 = "dep_01|cust_A:1000:inv_101|cust_B:2500:inv_102|cust_C:500:inv_103"
@@ -235,5 +188,5 @@ if __name__ == "__main__":
     print("-" * 50)
 
     print("## Part 4: Automatic Credit Application ##")
-    print(service._get_auto_matic_credit_application(deposit_p4, invoices_p4))
+    print(service.get_invoices_status(deposit_p4, invoices_p4))
     print("-" * 50)        
