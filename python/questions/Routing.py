@@ -33,130 +33,92 @@ Part 4: Historical Route Analysis Report
 """
 
 from collections import defaultdict
+import ast
 class Routing:
-                      
-    def _get_endpoint(self, log: str) -> str:
+    
+    def _get_endpoint(self, endpoint_info: str) -> str:
+        return endpoint_info.split("=")[1]
+    
+    def get_version_info(self, version_info: str):
+        versions_tokens = version_info.split("=")
+        version_information = versions_tokens[1][1: len(versions_tokens[1]) -1]
         
-        return log[0].split("=")[1]
-    
-    def _get_versions(self, log: str) -> tuple:
-        versions = {}
-        versions_tokens = log.split("=")
-        default_version = ""
-        versions_information = versions_tokens[1][1: len(versions_tokens[1])]
-        for version_information in versions_information.split(","):
-            version = version_information.split(":")[0]
- 
-            version_value = version_information.split(":")[1]
-            if "*" in version:
-               default_version = version_value
-            versions[version] = version_value
-        return versions, default_version
-    
-    def get_mapping(self, log: str) -> dict:
-        routing_info = defaultdict(defaultdict)
-        log_tokens = log.split("\n")
         mapping = {}
-        routing_info = defaultdict(defaultdict)
-        for log_token in log_tokens:
-            entry = log_token.split("::")
+        default_endpoint = ""
+        for version in version_information.split(","):
+            key = version.split(":")[0]
+            endpoint = version.split(":")[1]
+            if "*" in key:
+                key = key[:-1]
+                default_endpoint = endpoint
+                mapping[key]= endpoint
+            else:
+                mapping[key]= endpoint    
+                
+        return mapping, default_endpoint    
             
-            if entry[0].strip() == "REQ":
-                request = entry[1].strip()
-                api = entry[2].strip()
-                api_version = entry[3].split("=")[1].strip()
-                if api in routing_info and api_version in routing_info[api]:
-                    mapping[request] = routing_info.get(api).get(api_version)
-            elif entry[0].strip() == "ROUTE":
-                entry_tokens = entry[1].split(";")
-                endpoint = self._get_endpoint(entry_tokens)
-                versions, default = self._get_versions(entry_tokens[1])
-                routing_info[endpoint] = {}
-                routing_info[endpoint] = versions
-                        
-        return mapping
-    
-    def get_service_tally(self, log: str)  -> dict:
-        routing_info = defaultdict(defaultdict)
-        
-        ans = defaultdict(int)
-        log_tokens = log.split("\n")
-        for log_token in log_tokens:
-            entry = log_token.split("::")
-            if entry[0].strip() == "REQ":
-                request = entry[1]
-                api = entry[2]
-                api_version = entry[3].split("=")[1].strip()
-                if api in routing_info and api_version in routing_info[api]:
-                    ans[routing_info.get(api).get(api_version)] += 1
-            elif entry[0].strip() == "ROUTE":
-                entry_tokens = entry[1].split(";")
-                endpoint = self._get_endpoint(entry_tokens)
-                versions, default = self._get_versions(entry_tokens[1])
-                routing_info[endpoint] = {}
-                routing_info[endpoint] = versions        
-        return ans
-    
-    def get_service_tally_with_default(self, log: str)  -> dict:
-        routing_info = defaultdict(defaultdict)
-        default = ""
-        ans = defaultdict(int)
-        log_tokens = log.split("\n")
-        for log_token in log_tokens:
-            entry = log_token.split("::")
-            if entry[0].strip() == "REQ":
-                request = entry[1]
-                api = entry[2]
-                api_version = entry[3].split("=")[1].strip()
-                if api in routing_info and api_version in routing_info[api]:
-                    ans[routing_info.get(api).get(api_version)] += 1
-                else:
-                    ans[default] += 1    
-            elif entry[0].strip() == "ROUTE":
-                entry_tokens = entry[1].split(";")
-                endpoint = self._get_endpoint(entry_tokens)
-                versions, default = self._get_versions(entry_tokens[1])
-                routing_info[endpoint] = {}
-                routing_info[endpoint] = versions        
-        return ans
-    
-    def generate_historical_report(self, log: str, endpoint_to_report: str) -> str:
-        history = defaultdict(set)
-    
-        for log_token in log.strip().split("\n"):
-            if not log_token.strip().startswith("ROUTE"):
+                      
+    def parse_logs(self, log: str) -> dict:
+        events = log.split("\n")
+        api_requests_mapping = {}
+        route_mapping = defaultdict(lambda: {"default_endpoint": ""})
+        service_requests_count = defaultdict(int)
+        route_history = defaultdict(list)
+        deployment_counter = defaultdict(int)
+        for event in events:
+            if not event:
                 continue
+            request_type = event.split("::")[0]
+            rest_of_body = event.split("::")[1]
             
-            _, route_data = log_token.split("::", 1)
-            
-            endpoint, version_part = route_data.split(";", 1)
-            
-            current_endpoint = endpoint.split("=", 1)[1]
-            if current_endpoint != endpoint_to_report:
-                    continue
-            
-            veresions_str = version_part.split("=", 1)[1].strip("[]")
-            if not veresions_str:
-                continue    
-            
-            for pair in veresions_str.split(","):
-                version_id, service_name = pair.split(":", 1)
-                history[service_name].add(version_id)
+            if request_type == "ROUTE":
+               endpoint_info = rest_of_body.split(";")[0]
+               version_info = rest_of_body.split(";")[1]
+               endpoint = self._get_endpoint(endpoint_info)
+               mapping, default_endpoint = self.get_version_info(version_info)
+               route_mapping[endpoint] = mapping
+               route_mapping[endpoint]["default_endpoint"] = default_endpoint
+               deployment_counter[endpoint] += 1
+               route_history[endpoint].append({
+                "versions": mapping.copy(),
+                "order": deployment_counter[endpoint]
+            })
 
-        report_lines = []
-        header = f"Versioning Report for Endpoint: {endpoint_to_report}"
-        report_lines.append(header)
-        report_lines.append("=" * len(header))
-
-        # Iterate through services sorted alphabetically
-        for service_name in sorted(history.keys()):
-            report_lines.append(f"\nService: {service_name}")
+            elif request_type == "REQ":
+                request_id = event.split("::")[1]
+                endpoint = event.split("::")[2]
+                version =  event.split("::")[3].split("=")[1]
+                if endpoint in route_mapping and version in route_mapping[endpoint]:
+                    api_requests_mapping[request_id] = route_mapping[endpoint][version]
+                    service_requests_count[endpoint] += 1
+                else:
+                    default_endpoint = route_mapping[endpoint]["default_endpoint"]
+                    api_requests_mapping[request_id] = default_endpoint  
+                    
+        return {
+            "api_requests_mapping" : api_requests_mapping,
+            "service_requests_count": service_requests_count,
+            "route_history": route_history  
             
-            # Iterate through versions for that service, sorted alphabetically
-            for version_id in sorted(list(history[service_name])):
-                report_lines.append(f"  - {version_id}")
-
-        return "\n".join(report_lines)            
+        }  
+    def get_mapping(self, log: str) -> dict:
+        result = self.parse_logs(log)
+        return result["api_requests_mapping"] 
+    
+    def get_service_tally(self, log: str) -> dict:
+        result = self.parse_logs(log)
+        return result["service_requests_count"]
+     
+    def get_service_tally_with_default(self, defalut_log: str) -> dict:
+        result = self.parse_logs(defalut_log)
+        return result["api_requests_mapping"] 
+    
+    def get_routing_history(self, log: str, endpoint: str) -> dict:
+        result = self.parse_logs(log)
+         
+        return result["route_history"].get(endpoint, {})               
+               
+                
     
 if __name__ == "__main__":
     log = """ROUTE::endpoint=/v1/charges;versions=[2022-11-15:charges-v2,2023-08-01:charges-v3]
@@ -190,7 +152,7 @@ REQ::req_1::/a::api_version=v1
 ROUTE::endpoint=/a;versions=[v5*:service_X]
 """
 
-    print(routing.generate_historical_report(log, "/a"))
+    print(routing.get_routing_history(log, "/a"))
 
                     
                          
