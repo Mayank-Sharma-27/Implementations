@@ -33,11 +33,16 @@ returns: ["en-US"]***
 from collections import defaultdict
 class HttpHeaders:
     def parse_headers(self, user_header: str, server_support: list[str]) -> list[str]:
+        if not user_header or not user_header.strip():
+            return []
+        
         user_header_tokens = user_header.split(",")
         user_languages = {}
         rank = 0
         languages_to_return = []
         for token in user_header_tokens:
+            if not token:
+                continue
             token = token.strip()
             user_languages[token] = rank
             rank += 1
