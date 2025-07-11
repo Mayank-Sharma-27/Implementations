@@ -55,100 +55,112 @@ TOTAL
 from collections import defaultdict
 
 class Transactions:
-    def create_dict(self, transaction: str) -> dict:
-        
-        if not transaction:
-            return ValueError("Invalid Input")
-        transaction_tokens = transaction.split(",")
-        transaction_dict = defaultdict(list)
-        
-        for transaction_token in transaction_tokens:
-            tx_id, merchant_id, currency, amount, tx_type, timestamp = transaction_token.strip().split(":", 5)
-            transaction_dict[merchant_id].append({
-                "tx_id": tx_id,
+    
+    def parse_events(self, log: str) -> dict:
+        log_tokens = log.split(",")
+        events = []
+        for log_token in log_tokens:
+            transaction_id, merchant_id, currency, amount, event_type, timestamp = log_token.split(":")[0:6]
+            if event_type == "REFUND":
+                amount = int(amount)
+            events.append({
+                "transaction_id": transaction_id,
+                "merchant_id": merchant_id,
                 "currency": currency,
                 "amount": int(amount),
-                "type": tx_type,
-                "timestamp": timestamp,
+                "event_type": event_type,
+                "timestamp": timestamp
             })
             
-        return transaction_dict
+        events = sorted(events, key=lambda p:p["timestamp"])
+        
+        merchant_mapping = defaultdict(lambda: {"total_amount": 0, "currency_mappinng" : defaultdict(list)})
+        
+        for event in events:
+            merchant_id = event["merchant_id"]
+            amount = int(event["amount"])
+            event_type = event["event_type"]
+            timestamp = event["timestamp"]
+            currency  = event["currency"]
+            transaction_id = event["transaction_id"] 
+            merchant_mapping[merchant_id]["total_amount"] += amount
+            currency_mappinng = merchant_mapping[merchant_id]["currency_mappinng"]
+            currency_mappinng[currency].append({
+                "amount": amount,
+                "timestamp": timestamp,
+                "transaction_id": transaction_id
+            })
+            merchant_mapping[merchant_id]["currency_mappinng"] = currency_mappinng
+          
+        
+        return merchant_mapping    
     
-    def get_transactions(self,transaction_dict: dict) -> list[str]:
-        ans = [] 
-        for merchant_id in sorted(transaction_dict.keys()):
-            currency_dict = defaultdict(int)
-            for tx in transaction_dict[merchant_id]:
-                currency_dict[tx["currency"]] += tx["amount"]
-            for currency in sorted(currency_dict):
-                ans.append(f"{merchant_id} earned {currency_dict[currency]} in {currency}")
+    def get_transactions(self, log: str) -> dict:
+        transactions_dict = self.parse_events(log)
+        #print(transactions_dict)
+        ans = defaultdict(lambda: defaultdict(int))
+        
+        for merchant_id in transactions_dict:
+            for currency in  sorted(transactions_dict[merchant_id]["currency_mappinng"].keys()):
+                events = transactions_dict[merchant_id]["currency_mappinng"][currency]
+                for event in events:
+                    amount = int(event["amount"])
+                    ans[merchant_id][currency] += amount
         return ans
     
-    def get_transactions_with_cutoff_date(self, transaction_dict: dict, cutoff_date: str):
-        result = []
-        for merchant_id in sorted(transaction_dict.keys()):
-            currency_dict = defaultdict(int)
-            for tx in transaction_dict[merchant_id]:
-                tx_date = tx["timestamp"].split("T")[0]
-                if tx_date == cutoff_date:
-                    currency_dict[tx["currency"]] += tx["amount"]
-            for currency in sorted(currency_dict):
-                result.append(f"{merchant_id} earned {currency_dict[currency]} in {currency} on {cutoff_date}")
-        return result
+    def get_transactions_with_cutoff_date(self, log: str, cutoff_date: str) -> dict:
+        transactions_dict = self.parse_events(log)
+        #print(transactions_dict)
+        ans = defaultdict(lambda: defaultdict(int))
+        
+        for merchant_id in transactions_dict:
+            for currency in  sorted(transactions_dict[merchant_id]["currency_mappinng"].keys()):
+                events = transactions_dict[merchant_id]["currency_mappinng"][currency]
+                for event in events:
+                    time = event["timestamp"].split("T")[0]
+                    amount = int(event["amount"])
+                    if time <= cutoff_date:
+                        #print(amount)
+                        ans[merchant_id][currency] += amount
+        return ans
     
-    def get_transactions_with_unique_transactions(self, transaction_dict: dict, cutoff_date: str):
-        result = []
-        for merchant_id in sorted(transaction_dict.keys()):
-            seen_tx_ids = set()
-            currency_dict = defaultdict(int)
-            for tx in transaction_dict[merchant_id]:
-                if tx["tx_id"] in seen_tx_ids:
-                    continue
-                seen_tx_ids.add(tx["tx_id"])
-                tx_date = tx["timestamp"].split("T")[0]
-                if tx_date == cutoff_date:
-                    currency_dict[tx["currency"]] += tx["amount"]
-            for currency in sorted(currency_dict):
-                result.append(f"{merchant_id} earned {currency_dict[currency]} in {currency} on {cutoff_date}")
-        return result 
+    def get_transactions_with_unique_transactions(self, log: str, cutoff_date: str) -> dict:
+        transactions_dict = self.parse_events(log)
+        #print(transactions_dict)
+        ans = defaultdict(lambda: defaultdict(int))
+        done_transactions = set()
+        for merchant_id in transactions_dict:
+            for currency in  sorted(transactions_dict[merchant_id]["currency_mappinng"].keys()):
+                events = transactions_dict[merchant_id]["currency_mappinng"][currency]
+                for event in events:
+                    time = event["timestamp"].split("T")[0]
+                    amount = int(event["amount"])
+                    transaction_id = event["transaction_id"]
+                    if time <= cutoff_date and transaction_id not in done_transactions:
+                        done_transactions.add(transaction_id)
+                        #print(amount)
+                        ans[merchant_id][currency] += amount
+        return ans
     
-    def generate_reconciliation_report(self, transaction_dict: dict, cutoff_date: str) -> str:
-        seen_tx_ids = set()
-        merchant_currency_totals = defaultdict(lambda: defaultdict(int))
-        global_currency_totals = defaultdict(int)
-
-        for merchant_id in sorted(transaction_dict.keys()):
-            for tx in transaction_dict[merchant_id]:
-                tx_id = tx["tx_id"]
-                if tx_id in seen_tx_ids:
-                    continue
-                seen_tx_ids.add(tx_id)
-
-                tx_date = tx["timestamp"].split("T")[0]
-                if tx_date != cutoff_date:
-                    continue
-
-                currency = tx["currency"]
-                amount = tx["amount"]
-
-                merchant_currency_totals[merchant_id][currency] += amount
-                global_currency_totals[currency] += amount
-
-        # Build report
-        lines = [f"Reconciliation Report for {cutoff_date}\n"]
-        for merchant_id in sorted(merchant_currency_totals.keys()):
-            lines.append(f"Merchant: {merchant_id}")
-            for currency in sorted(merchant_currency_totals[merchant_id].keys()):
-                amt = merchant_currency_totals[merchant_id][currency]
-                lines.append(f"  {currency}: {amt}")
-            lines.append("")  # blank line between merchants
-
-        # Add totals
-        lines.append("TOTAL")
-        for currency in sorted(global_currency_totals.keys()):
-            lines.append(f"  {currency}: {global_currency_totals[currency]}")
-
-        return "\n".join(lines)        
+    def generate_reconciliation_report(self, log: str, cutoff_date: str) -> dict:
+        transactions_dict = self.parse_events(log)
+        #print(transactions_dict)
+        ans = defaultdict(lambda: defaultdict(int))
+        done_transactions = set()
+        for merchant_id in transactions_dict:
+            for currency in  sorted(transactions_dict[merchant_id]["currency_mappinng"].keys()):
+                events = transactions_dict[merchant_id]["currency_mappinng"][currency]
+                for event in events:
+                    time = event["timestamp"].split("T")[0]
+                    amount = int(event["amount"])
+                    transaction_id = event["transaction_id"]
+                    if time <= cutoff_date and transaction_id not in done_transactions:
+                        done_transactions.add(transaction_id)
+                        #print(amount)
+                        ans[merchant_id][currency] += amount
+            ans[merchant_id]["total_amount"]  = transactions_dict[merchant_id]["total_amount"]      
+        return ans
+                     
                 
 if __name__ == "__main__":
     log = (
@@ -160,12 +172,9 @@ if __name__ == "__main__":
     )
     cutoff_date = "2025-06-24"
     transactions = Transactions()
-    transactions_dict = transactions.create_dict(log)
     
-
-    # You should implement this function or class method
-    print(transactions.get_transactions(transactions_dict))
-    print(transactions.get_transactions_with_cutoff_date(transactions_dict,cutoff_date))
-    print(transactions.get_transactions_with_unique_transactions(transactions_dict, cutoff_date))
-    print(transactions.generate_reconciliation_report(transactions_dict, cutoff_date))
+    print(dict(transactions.get_transactions(log)))
+    print(dict(transactions.get_transactions_with_cutoff_date(log,cutoff_date)))
+    print(dict(transactions.get_transactions_with_unique_transactions(log, cutoff_date)))
+    print(transactions.generate_reconciliation_report(log, cutoff_date))
                   

@@ -30,3 +30,45 @@ parseacceptlanguage("en-US", ["en-US", "fr-CA"])
 returns: ["en-US"]***
 
 """
+from collections import defaultdict
+class HttpHeaders:
+    def parse_headers(self, user_header: str, server_support: list[str]) -> list[str]:
+        user_header_tokens = user_header.split(",")
+        user_languages = {}
+        rank = 0
+        languages_to_return = []
+        for token in user_header_tokens:
+            token = token.strip()
+            user_languages[token] = rank
+            rank += 1
+        for language in server_support:
+            if language in user_languages:
+                rank = user_languages[language]
+                languages_to_return.append({
+                   "language": language,
+                   "rank": rank
+               })
+        
+        languages_to_return = sorted(languages_to_return, key=lambda p: p["rank"])
+        ans = []
+        
+        for language in languages_to_return:
+            ans.append(language["language"])
+        return ans    
+    
+if __name__ == "__main__":
+     
+    service = HttpHeaders()
+
+    print(service.parse_headers("en-US", ["en-US", "fr-CA"]))
+    # → ["en-US"]
+
+    print(service.parse_headers("en-US, fr-CA", ["en-US", "fr-CA"]))
+    # → ["en-US", "fr-CA"]
+
+    print(service.parse_headers("fr-CA, fr-FR", ["en-US", "fr-FR"]))
+    # → ["fr-FR"]
+
+    print(service.parse_headers("en-US, fr-CA, fr-FR", ["fr-FR", "en-US"]))
+
+                    

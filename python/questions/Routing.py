@@ -56,8 +56,7 @@ class Routing:
                 mapping[key]= endpoint    
                 
         return mapping, default_endpoint    
-            
-                      
+                     
     def parse_logs(self, log: str) -> dict:
         events = log.split("\n")
         api_requests_mapping = {}
