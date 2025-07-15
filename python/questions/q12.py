@@ -17,108 +17,86 @@ events_to_send = ["evt_A;http://endpoint.com/a", "evt_B;http://endpoint.com/b"]
 policy = {"initial_delay_seconds": 60, "max_retries": 3}
 response_log = "2025-08-01T12:00:00Z;evt_A;503&2025-08-01T12:01:00Z;evt_A;503&2025-08-01T12:02:00Z;evt_B;200&2025-08-01T12:03:00Z;evt_A;200"
 """
+
 from collections import defaultdict
 from datetime import datetime, timedelta
 class WebhookDelivery:
-    def parse_events(self, logs: str) -> dict:
-        response_logs_tokens = logs.split("&")
-        events = []
-        for response_log_token in response_logs_tokens:
-            timestamp, event_id, http_status = response_log_token.split(";")
-            
-            events.append({
-                "timestamp": timestamp,
-                "event_id": event_id,
-                "http_status": int(http_status)
-            })
-        events = sorted(events, key=lambda p:p["timestamp"])
-        
-        events_mapping = defaultdict(list)
-        
-        for event in events:
-            event_id = event["event_id"]
-            time = datetime.fromisoformat(event["timestamp"].replace('Z', '+00:00'))
-            http_status = event["http_status"]
-            events_mapping[event_id].append({
-                "time": time,
-                "http_status": http_status
-            })
-        return events_mapping   
-        
-    def get_initial_status(self, logs: str) ->  dict:
-        events_mapping = self.parse_events(logs)
-        
-        event_initial_status_map = {}
-        
-        for id, events in events_mapping.items():
-            initial_status = events[0]["http_status"]
-            print(f"{events[0]} : {id}")
-            if initial_status != 200:
-               event_initial_status_map[id] = "FAILED"
-            else:
-               event_initial_status_map[id] = "DELIVERED"  
-        
-        return event_initial_status_map
     
-    def get_retry_schedule(self, logs: str, policy: dict) -> dict:
-        events_mapping = self.parse_events(logs)
-        events_to_retry_schdule = defaultdict(list)
-        max_retries = int(policy["max_retries"])
-        delay = int(policy["initial_delay_seconds"])
-        for id, events in events_mapping.items():
-            initial_status = events[0]["http_status"]
-            if initial_status != 200:
-               time = events[0]["time"]
-               current_delay = int(policy["initial_delay_seconds"]) # Start with the initial delay
-               time = events[0]["time"]    
-               for i in range (0, max_retries):
-                   time =  time + timedelta(seconds=current_delay)
-                   events_to_retry_schdule[id].append(time)
-                   current_delay = current_delay * 2
+    def parse_events(self, log: str, events_to_send: list) -> dict:
         
-        return events_to_retry_schdule
-    
-    def get_final_event_status(self, logs: str) -> dict:
-        events_mapping = self.parse_events(logs)
+        log_tokens = log.split("&")
+        events_mapping = {}
         
-        event_final_status_map = {}
-        
-        for id, events in events_mapping.items():
-            event_index = len(events) -1
-            initial_status = events[event_index]["http_status"]
-            if initial_status != 200:
-               event_final_status_map[id] = "FAILED"
-            else:
-               event_final_status_map[id] = "DELIVERED"  
-        
-        return event_final_status_map
-    
-    def get_unreliable_url(self, logs: str, events_to_send: dict) -> dict:
-        events_mapping = self.parse_events(logs)
-        
-        unreliable_events = []
-        events_mapping_url = {}
         for event in events_to_send:
-            token = event.split(";")
-            id = token[0].strip()
-            url = token[1].strip()
-            events_mapping_url[id] = url
-           
+            event_id = event.split(";")[0]
+            value = event.split(";")[1]
+            events_mapping[event_id] = value
+            
+        events = defaultdict(list)
+        for token in log_tokens:
+            timestamp, event_id, response_code = token.split(";")
+            status = "FAILED"
+            if response_code == "200":
+                status = "SUCCESS"
+            time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))    
+            events[event_id].append({
+                "status": status,
+                "timestamp": time,
+                "response_code": response_code,
+                "endpoint": events_mapping[event_id]
+            })
+        for event_id in events.keys():
+                
+            events[event_id] = sorted(events[event_id], key=lambda e:e["timestamp"])
+        return events
+    
+    def get_initial_status(self, log: str, events_to_send: list ) -> dict:
+        events = self.parse_events(log, events_to_send)
+        event_status_mapping = {}
         
-        for id, events in events_mapping.items():
+        for event_id, event in events.items():
+            event_status_mapping[event_id] = event[0]["status"]
+        return event_status_mapping
+    
+    def get_retry_schedule(self, log: str, policy: dict,  events_to_send: list) -> dict:
+        
+        events = self.parse_events(log, events_to_send)  
+        events_to_retry = defaultdict(list) 
+        max_retries = int(policy["max_retries"])
+        for event_id, event in events.items():
+            initial_status = event[0]["response_code"]
+            if initial_status != 200:
+                time = event[0]["timestamp"]
+                current_delay = int(policy["initial_delay_seconds"])
+                for i in range (0, max_retries):
+                    time = time + timedelta(seconds=current_delay)
+                    events_to_retry[event_id] = time
+                    current_delay = current_delay * 2
+        return events_to_retry
+    
+    def get_final_event_status(self, log: str, events_to_send: list) -> dict:
+        events = self.parse_events(log, events_to_send)
+        event_status_mapping = {}
+        
+        for event_id, event in events.items():
+            length = len(event)
+            event_status_mapping[event_id] = event[length - 1]["status"]
+        return event_status_mapping
+    
+    def get_unreliable_url(self, log: str, events_to_send: list) -> list:
+        events = self.parse_events(log, events_to_send)
+        ans = []
+        for event_id, event in events.items():
             consecutive = 0
-            last_event = None
-            for event in events:
-                status = event["http_status"]
-                if status != 200:
-                    consecutive += 1
+            for e in event:
+                if e["status"] == "FAILED":
+                    consecutive +=1
                 else:
                     consecutive = 0
                 if consecutive == 3:
-                   unreliable_events.append(events_mapping_url[id])        
-                          
-                
-        return unreliable_events
+                    ans.append(e["endpoint"])
+        return ans                    
+            
 
 if __name__ == "__main__":
     # --- Test Data ---
@@ -147,7 +125,7 @@ if __name__ == "__main__":
     # --- Part 1 ---
     print("## Part 1: Initial Delivery Status ##")
     # Expected: A map like {'evt_A': 'FAILURE', 'evt_B': 'SUCCESS', 'evt_C': 'FAILURE'}
-    print(simulator.get_initial_status(response_log))
+    print(simulator.get_initial_status(response_log, events_to_send))
     print("-" * 50)
 
 
@@ -155,14 +133,14 @@ if __name__ == "__main__":
     print("## Part 2: Retry Schedule ##")
     # Expected: For evt_A (failed at 12:00:00), schedule would be [12:01:00, 12:03:00, 12:07:00]
     # {'evt_A': ['2025-08-01T12:01:00Z', '2025-08-01T12:03:00Z', ...], 'evt_C': [...]}
-    print(dict(simulator.get_retry_schedule(response_log, policy)))
+    print(dict(simulator.get_retry_schedule(response_log, policy, events_to_send)))
     print("-" * 50)
 
 
     # --- Part 3 ---
     print("## Part 3: Final Event Status ##")
     # Expected: {'evt_A': 'DELIVERED', 'evt_B': 'DELIVERED', 'evt_C': 'FAILED'}
-    print(simulator.get_final_event_status(response_log))
+    print(simulator.get_final_event_status(response_log, events_to_send))
     print("-" * 50)
 
 
@@ -170,7 +148,7 @@ if __name__ == "__main__":
     print("## Part 4: Unreliable Endpoints ##")
     # Expected: A list containing 'http://endpoint.com/a' because evt_C failed more than 3 times in a row.
     # ['http://endpoint.com/a']
-    print(simulator.get_unreliable_url( response_log, events_to_send))
+    print(simulator.get_unreliable_url(response_log, events_to_send))
     print("-" * 50)    
                    
                    
