@@ -1,92 +1,117 @@
+"""
+You are building a service for a SaaS company that automatically assigns users to subscription tiers ('Bronze', 'Silver', 'Gold') based on their monthly usage.
+
+Input Format
+A definition of tier boundaries, format: Bronze:0,Silver:1000,Gold:5000.
+A log of daily usage events, separated by &. Format: date;customer_id;usage_amount.
+The Task
+Total Monthly Usage: For a given month, calculate the total usage_amount for each customer.
+Tier Assignment: Determine the correct subscription tier for each customer for that month.
+Tier Change Notifications: Compare the assigned tier for the current month to the previous month. Generate a notification for any customer whose tier has changed.
+Projected Tier Calculation: Halfway through the current month, calculate each customer's projected total monthly usage (assume usage rate is constant) and determine their "projected tier".
+Sample Input
+tier_boundaries = "Bronze:0,Silver:1000,Gold:5000"
+usage_log = "2025-01-10;cust_A;600&2025-01-12;cust_B;30&2025-01-15;cust_A;100"
+
+"""
+
 from collections import defaultdict
 
 class SubscriptionTier:
-    def parse_events(self, usage_log: str, tier_boundries: str) -> dict:
-        events = []
+    
+    def parse_events(self, logs: str, tier_boundries: str) -> dict:
+        logs_token = logs.split("&")
+        customer_monthly_mapping = defaultdict(lambda:  defaultdict(list))
+        tier_mapping = {}
         
-        usage_log_tokens = usage_log.split("&")
-        tier_map = {}
+        tier_boundries_tokens = {}
         
-        tier_boundries_token = tier_boundries.split(",")
-        tiers = []
-        for t in tier_boundries_token:
-            key, value = t.split(":")
-            tiers.append(int(value))
+        for token in tier_boundries.split(","):
+            value = token.split(":")[1]
+            tier = token.split(":")[0]
+            tier_boundries_tokens[value] = tier
         
-        for usage_log_token in usage_log_tokens:
-            date, customer_id, usage = usage_log_token.split(";")
+        total_monthly_usage_mapping = defaultdict(lambda: defaultdict(lambda: {"total_usage": 0, "tier": "Bronze"}))
+        for log_token in logs_token:
+            date, customer_id, usage_amount = log_token.split(";")
             month = date.split("-")[1]
-            events.append({
-                "date": date,
-                "customer_id": customer_id,
-                "month": month,
-                "usage": usage
+            usage_amount = int(usage_amount)
+                    
+            customer_monthly_mapping[customer_id][month].append({
+                "usage_amount": int(usage_amount),
+                "date": date
             })
-        events = sorted(events, key=lambda e : e["date"])
-        custmer_subs = defaultdict(dict)
+            total_monthly_usage_mapping[customer_id][month]["total_usage"] += usage_amount
+            monthly_amount_used = int(total_monthly_usage_mapping[customer_id][month]["total_usage"])
+           
+            for tier_value in tier_boundries_tokens.keys():
+                if monthly_amount_used > int(tier_value):
+                    tier = tier_boundries_tokens[tier_value]
+            total_monthly_usage_mapping[customer_id][month]["tier"]= tier
         
-        for event in events:
-            customer_id = event["customer_id"] 
-            month = event["month"]
-            usage = int(event["usage"])
-            if custmer_subs[customer_id].get(month) is None:
-               custmer_subs[customer_id][month] = {}
-               custmer_subs[customer_id][month]["usage_amount"] = 0
-               custmer_subs[customer_id][month]["subscription_tier"] = "Bronze"
-               custmer_subs[customer_id][month]["project_tier"] = ""
+        return {"customer_monthly_mapping": customer_monthly_mapping, "total_monthly_usage_mapping": total_monthly_usage_mapping}
+    
+    def get_total_usage(self, logs: str, tier_boundries: str, month: str) -> dict:
+        events =  self.parse_events(logs, tier_boundries)
+        total_monthly_usage_mapping = events["total_monthly_usage_mapping"]
+        
+        customer_usage_monthly = defaultdict(lambda: {})
+        for customer_id in total_monthly_usage_mapping.keys():
+            months = total_monthly_usage_mapping[customer_id].keys()
+            for month in months:
+                customer_usage_monthly[customer_id][month] = total_monthly_usage_mapping[customer_id][month]["total_usage"]
+        
+        return customer_usage_monthly
+    
+    def get_tier_assesmment(self, logs: str, tier_boundries: str, month: str) -> dict:
+        events =  self.parse_events(logs, tier_boundries)
+        total_monthly_usage_mapping = events["total_monthly_usage_mapping"]
+        
+        customer_tier_mapping = defaultdict(lambda: {})
+        for customer_id in total_monthly_usage_mapping.keys():
+            months = total_monthly_usage_mapping[customer_id].keys()
+            for month in months:
+                customer_tier_mapping[customer_id][month] = total_monthly_usage_mapping[customer_id][month]["tier"]
+        
+        return customer_tier_mapping
+    
+    def get_tier_assesmment_notificaiton(self, logs: str, tier_boundries: str, current_month: str, previous_month: str) -> dict:
+        events =  self.parse_events(logs, tier_boundries)
+        total_monthly_usage_mapping = events["total_monthly_usage_mapping"]
+        notifications = defaultdict(list)
+        for customer_id in total_monthly_usage_mapping.keys():
+            if total_monthly_usage_mapping[customer_id].get(previous_month) is None:
+               notifications[customer_id].append({
+                   "old_tier": "None",
+                   "current_tier": current_tier,
+                   "change": "NEW"
+               }) 
+            else:    
+                previous_month_info = total_monthly_usage_mapping[customer_id][previous_month]
+                tier = previous_month_info["tier"]
+                prev_total_usage = int(previous_month_info["total_usage"])
+                current_month_info = total_monthly_usage_mapping[customer_id][current_month]
+                current_total_usage = int(current_month_info["total_usage"])
+                change = "UPGRADE"
+                current_tier = current_month_info["tier"]
+                if current_total_usage < prev_total_usage:
+                    change = "DOWNGRADE"    
+                if current_tier != tier:
+                    notifications[customer_id].append({
+                        "old_tier": tier,
+                        "current_tier": current_tier,
+                        "change": change
+                    }) 
             
-            usage_amount = custmer_subs[customer_id][month]["usage_amount"] + usage
+        return notifications 
                 
-            # Assuming tiers = [0, 1000, 5000]
-            if usage_amount >= tiers[2]:  # 5000+
-                custmer_subs[customer_id][month]["subscription_tier"] = "Gold"
-            elif usage_amount >= tiers[1]: # 1000-4999
-                custmer_subs[customer_id][month]["subscription_tier"] = "Silver"
-            else: # 0-999
-                custmer_subs[customer_id][month]["subscription_tier"] = "Bronze"    
+        def get_projections(self, usage_log: str, tier_boundries: str) -> dict:
+            custmer_subs = self.parse_events(usage_log, tier_boundries)
+            return custmer_subs       
         
-        return custmer_subs
-    
-    def get_total_usage(self, usage_log: str, tier_boundries: str, month: str) -> dict:
-        custmer_subs = self.parse_events(usage_log, tier_boundries)
-        customer_usage_for_month = defaultdict(dict)
-        #print(custmer_subs)
-        for customer_id in custmer_subs.keys():
-            if custmer_subs[customer_id][month]:
-               if customer_usage_for_month[customer_id].get(month) is None:
-                  customer_usage_for_month[customer_id][month] = {}   
-               customer_usage_for_month[customer_id][month] = custmer_subs[customer_id][month]["usage_amount"]
-        
-        return customer_usage_for_month
-    
-    def get_tier_assesmment(self, usage_log: str, tier_boundries: str, month: str) -> dict:      
-        custmer_subs = self.parse_events(usage_log, tier_boundries)
-        customer_tier_for_month = defaultdict(dict)
-        
-        for customer_id in custmer_subs.keys():
-            if custmer_subs[customer_id].get(month) is not None:
-                if customer_tier_for_month[customer_id].get(month) is None:
-                  customer_tier_for_month[customer_id][month] = {}  
-                customer_tier_for_month[customer_id][month] = custmer_subs[customer_id][month]["subscription_tier"]
-        
-        return customer_tier_for_month
-    
-    def get_tier_assesmment_notificaiton(self, usage_log: str, tier_boundries: str, month: str, pre_month: str) ->dict:       
-        customer_tier_for_month = self.get_tier_assesmment(usage_log, tier_boundries, month)
-        customer_tier_for_pre_month = self.get_tier_assesmment(usage_log, tier_boundries, pre_month)
-        notification = {}
-        for key in customer_tier_for_month.keys():
-            if customer_tier_for_pre_month[key].get(pre_month) is None:
-               notification[key] = {"old_tier": None, "new_tier": customer_tier_for_month[key][month] , "change": "NEW"} 
-               continue
-            if customer_tier_for_month[key][month] != customer_tier_for_pre_month[key][pre_month]:
-               notification[key] = {"old_tier": customer_tier_for_pre_month[key][pre_month], "new_tier": customer_tier_for_month[key][month] }
                 
-        return notification    
+        
     
-    def get_projections(self, usage_log: str, tier_boundries: str) -> dict:
-        custmer_subs = self.parse_events(usage_log, tier_boundries)
-        return custmer_subs   
     
 if __name__ == "__main__":
     # --- Test Data ---
