@@ -21,79 +21,69 @@ alert_threshold = 5000
 from collections import defaultdict
 
 class BalanceReport:
+    
     def parse_events(self, logs: str) -> dict:
-        events = []
         log_tokens = logs.split("|")
+        account_mapping = defaultdict(list)
         
         for log_token in log_tokens:
             timestamp, account_id, event_type, amount = log_token.split(";")
-            events.append({
+            account_mapping[account_id].append({
                 "timestamp": timestamp,
-                "account_id": account_id,
                 "event_type": event_type,
                 "amount": int(amount)
             })
         
-        events = sorted(events, key=lambda p: p["timestamp"]) 
-        #print(events)
-        account_id_mapping = defaultdict(list)
-        for event in events:
-            timestamp = event["timestamp"]
-            amount = int(event["amount"])
-            event_type = event["event_type"]
-            account_id = event["account_id"]
-            account_id_mapping[account_id].append({
-               "timestamp": timestamp,
-               "amount": amount,
-               "event_type": event_type 
-            })
-        
-        return account_id_mapping
-    
-    def get_final_balance(self, logs: str) -> dict:
-        account_id_mapping = self.parse_events(logs)
-        #print(account_id_mapping)
-        account_id_balance = defaultdict(int)
-        for account_id in account_id_mapping.keys():
-            infor = account_id_mapping[account_id]
-            for info in infor:
-                event_type = info["event_type"]
-                amount = int(info["amount"])
-                if event_type == "TOP_UP":
-                    account_id_balance[account_id] += amount 
-                else:
-                    account_id_balance[account_id] -= amount        
-        
-        
-        return account_id_balance
-    
-    def get_balance_history(self, logs: str, account_id: str) -> dict:
-        account_id_mapping = self.parse_events(logs)
-        account_id_balance = defaultdict(list)
-        
-        current_balance = 0
-        for info in account_id_mapping[account_id]:
-            event_type = info["event_type"]
-            amount = int(info["amount"])
-            timestamp = info["timestamp"]
-            if event_type == "TOP_UP":
-                current_balance += amount 
-            else:
-                current_balance -= amount
-            account_id_balance[account_id].append({
-                    "timestamp": timestamp,
-                    "amount" : current_balance
-                })
+        for account_id in account_mapping:
+            account_mapping[account_id] = sorted(account_mapping[account_id], key=lambda p:p["timestamp"])
+            
+        for account_id in account_mapping:
+                balance = 0
+                for events in  account_mapping[account_id]:
+                    if events.get("current_balance") is None:
+                       events["current_balance"] = balance
+                    if events["event_type"] == "FEE":
+                        events["current_balance"] -= events["amount"]
+                    elif events["event_type"] == "TOP_UP":
+                        events["current_balance"] += events["amount"]
                             
+                    balance = events["current_balance"]
+                #account_mapping[account_id] = events        
         
-        return account_id_balance
+        return account_mapping                 
+                               
+    def get_final_balance(self, logs: str) -> dict:
+        account_mapping = self.parse_events(logs)
+        
+        account_balance_mapping = {}
+        
+        for account_id in account_mapping:
+            length = len(account_mapping[account_id]) 
+            #print(account_mapping)
+            account_balance_mapping[account_id] = account_mapping[account_id][length - 1]["current_balance"] 
+        
+        return account_balance_mapping
     
-    def get_alerts(self, logs: str, alert_threshold: int) -> dict :
+    def get_balance_history(self, logs: str, account_id: str) -> list:
+        account_mapping = self.parse_events(logs)
         
-        account_id_mapping = self.parse_events(logs)
+        balance_history = defaultdict(list)
+        events = account_mapping[account_id]
+        for event in events:
+            balance_history[account_id].append(
+                {
+                    "timestamp": event["timestamp"],
+                    "amount": event["current_balance"]
+                }
+            )
+            
+        return balance_history
+    
+    def get_alerts(self, logs: str, alert_threshold: int) -> list:
+        account_mapping = self.parse_events(logs)
         alerts = defaultdict(list)
         prev_amount = None
-        for account_id in account_id_mapping.keys(): 
+        for account_id in account_mapping:
             balance_history = self.get_balance_history(logs, account_id)
             for history in balance_history[account_id]:
                 amount = history["amount"]
@@ -105,21 +95,20 @@ class BalanceReport:
                         alerts[account_id].append("Balance dropped")
                 prev_amount = amount
         
+
         return alerts
     
-    def get_alerts_when_at_risk(self, logs: str, alert_threshold: int) -> dict :
+    def get_alerts_when_at_risk(self, logs: str, alert_threshold: int)  -> dict:
         alerts = self.get_alerts(logs, alert_threshold)
-        
-        prev_amount = None
-        accounts_at_risk = []
+       
+        accounts_at_risk = [] 
         for alert in alerts.keys():
             number_of_alerts = len(alerts[alert])
             if number_of_alerts >=2:
-               accounts_at_risk.append(alert) 
-            
-        return accounts_at_risk    
-                   
-            
+                accounts_at_risk.append(alert)
+        return accounts_at_risk        
+               
+                                  
 if __name__ == "__main__":
     # --- Test Data ---
     # This log includes multiple accounts and threshold crossings to test all parts.

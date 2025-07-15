@@ -2,92 +2,95 @@ from collections import defaultdict
 from datetime import datetime
 
 class TransferReversal:
-    def parse_events(self, logs: str) -> dict:
-        transfer_events = defaultdict(list)
-        log_tokens = logs.split("|")
-        account_id_transfer_mappings = defaultdict(set) 
+    
+    def parse_events(self, log: str) -> dict:
+        log_tokens = log.split("|")
+        
+        transfers = defaultdict(list)
+        accounts_transfers_mapping = defaultdict(list)
         
         for log_token in log_tokens:
-            timestamp, event_type, transfer_id, account_id, amount = log_token.split(";")
-            transfer_events[transfer_id].append({
-                "timestamp": timestamp,
+            timestamp ,event_type, transfer_id, account_id, amount = log_token.split(";")
+            transfers[transfer_id].append({
                 "event_type": event_type,
                 "account_id": account_id,
-                "amount": int(amount)
+                "amount" : int(amount),
+                "timestamp": timestamp
             })
-            account_id_transfer_mappings[account_id].add(transfer_id)
-        
-        for transfer_id in transfer_events.keys():
-            transfer_events[transfer_id] = sorted(transfer_events[transfer_id], key=lambda p: p["timestamp"])
+            transfers_in_account = accounts_transfers_mapping.get(account_id, [])
+            if transfer_id not in transfers_in_account:
+               transfers_in_account.append(transfer_id)
+               accounts_transfers_mapping[account_id] = transfers_in_account
             
-        return transfer_events,account_id_transfer_mappings
+        for id in transfers.keys():
+                transfers[id] = sorted(transfers[id], key=lambda p:p["timestamp"])
+                
+        return {"transfers": transfers, "accounts_transfers_mapping": accounts_transfers_mapping}
+        
+    def get_transfer_status(self, log: str) -> dict:
+        events = self.parse_events(log)
+        transfers = events["transfers"]
+        ans = {}
+        for id, transfer in transfers.items():
+            length = len(transfer)
+            ans[id] = transfer[length - 1]["event_type"]
+        return ans
     
-    def get_transfer_status(self, logs: str) -> dict:
-        transfer_events, account_id_transfer_mappings = self.parse_events(logs)
-        
-        transfer_id_status = {}
-        for transfer_id in transfer_events:
-            event_length = len(transfer_events[transfer_id])
-            
-            final_event = transfer_events[transfer_id][event_length-1]["event_type"]
-            
-            if final_event == "TRANSFER_PAID":
-                transfer_id_status[transfer_id] = "PAID"
-            elif final_event == "TRANSFER_FAILED":
-                transfer_id_status[transfer_id] = "FAILED" 
-            else:
-                transfer_id_status[transfer_id] = "REVERSED"
-        return transfer_id_status
-   
-    def get_final_balance(self, logs: str) -> dict:
-        transfer_events, account_id_transfer_mappings = self.parse_events(logs)  
-        balance_mapping = {}
-        for account_id in account_id_transfer_mappings:
+    def get_final_balance(self, log: str) -> dict:
+        events = self.parse_events(log)
+        transfers_mapping = events["transfers"]
+        #print(transfers_mapping)
+        accounts_transfers_mapping =  events["accounts_transfers_mapping"]
+        transfer_final_status = self.get_transfer_status(log)
+        ans = {}
+        for account_id in accounts_transfers_mapping:
             balance = 0
-            for transfer_id in account_id_transfer_mappings[account_id]:
-                for event in transfer_events[transfer_id]:
-                    amount = event["amount"]
+            for transfer_id in accounts_transfers_mapping[account_id]:
+                for event in transfers_mapping[transfer_id]:
+                    amount = int(event["amount"])
                     event_type = event["event_type"]
                     if event_type == "TRANSFER_CREATED":
                         balance -= amount
                     elif event_type == "REVERSAL_CREATED":
                         balance += amount
-            balance_mapping[account_id] = balance
-        return balance_mapping
-    
+            ans[account_id] = balance
+        return ans      
+                
     def get_reversal_latency(self, logs: str) -> dict:
-        transfer_events, account_id_transfer_mappings = self.parse_events(logs) 
-        transfer_id_latency_mapping = {}
-        for transaction_id in transfer_events.keys():
-            creation_time_str = None
-            reversal_time_str = None
+        events = self.parse_events(logs)
+        transfers = events["transfers"]
+        transfer_id_reversal_mapping = {}
+        for transfer_id, transfer in transfers.items():
+            creation_time = None
+            reversal_time = None
             
-            for event in transfer_events[transaction_id]:
+            for event in transfers[transfer_id]:
                 if event["event_type"] == "TRANSFER_CREATED":
-                    creation_time_str = event["timestamp"]
-                elif event["event_type"] == "REVERSAL_CREATED":
-                    reversal_time_str = event["timestamp"]
+                   creation_time = event["timestamp"]
+                if event["event_type"] == "REVERSAL_CREATED":
+                   reversal_time = event["timestamp"]
             
-            if creation_time_str and reversal_time_str:
-                cretion_time = datetime.fromisoformat(creation_time_str.replace('Z', '+00:00'))
-                reversal_time = datetime.fromisoformat(reversal_time_str.replace('Z', '+00:00'))
+            if creation_time and reversal_time:
+                cretion_time = datetime.fromisoformat(creation_time.replace('Z', '+00:00'))
+                reversal_time = datetime.fromisoformat(reversal_time.replace('Z', '+00:00'))
                 
                 latency_seconds = (reversal_time - cretion_time).total_seconds()  
                 
-                transfer_id_latency_mapping[transaction_id] = latency_seconds          
-            
-        return transfer_id_latency_mapping
+                transfer_id_reversal_mapping[transfer_id] = latency_seconds
+        return transfer_id_reversal_mapping
     
     def get_risk_accounts(self, logs: str) -> list[str]:   
-        transfer_events, account_id_transfer_mappings = self.parse_events(logs)
+        events = self.parse_events(logs)
+        transfers = events["transfers"]
+        accounts_transfers_mapping =  events["accounts_transfers_mapping"]
         risk_accounts = []
         
-        for account_id in account_id_transfer_mappings:
-            total_transfers = len(account_id_transfer_mappings[account_id])
+        for account_id in accounts_transfers_mapping:
+            total_transfers = len(accounts_transfers_mapping[account_id])
             
             number_of_reversed = 0
-            for transfer_id in account_id_transfer_mappings[account_id]:
-                for event in transfer_events[transfer_id]:
+            for transfer_id in accounts_transfers_mapping[account_id]:
+                for event in transfers[transfer_id]:
                     event_type = event["event_type"]
                     if event_type == "REVERSAL_CREATED":
                         number_of_reversed += 1
@@ -95,7 +98,8 @@ class TransferReversal:
                 risk_accounts.append(account_id)
                 
                         
-        return risk_accounts
+        return risk_accounts                                         
+                
 
 if __name__ == "__main__":
     # --- Test Data ---
