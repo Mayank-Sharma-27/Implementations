@@ -44,9 +44,10 @@ class SubscriptionTier:
             total_monthly_usage_mapping[customer_id][month]["total_usage"] += usage_amount
             monthly_amount_used = int(total_monthly_usage_mapping[customer_id][month]["total_usage"])
            
-            for tier_value in tier_boundries_tokens.keys():
+            for tier_value in sorted(map(int, tier_boundries_tokens.keys())):
                 if monthly_amount_used > int(tier_value):
-                    tier = tier_boundries_tokens[tier_value]
+                    tier = tier_boundries_tokens[str(tier_value)]
+
             total_monthly_usage_mapping[customer_id][month]["tier"]= tier
         
         return {"customer_monthly_mapping": customer_monthly_mapping, "total_monthly_usage_mapping": total_monthly_usage_mapping}
@@ -105,14 +106,10 @@ class SubscriptionTier:
             
         return notifications 
                 
-        def get_projections(self, usage_log: str, tier_boundries: str) -> dict:
+    def get_projections(self, usage_log: str, tier_boundries: str) -> dict:
             custmer_subs = self.parse_events(usage_log, tier_boundries)
             return custmer_subs       
-        
-                
-        
-    
-    
+
 if __name__ == "__main__":
     # --- Test Data ---
     tier_boundaries = "Bronze:0,Silver:1000,Gold:5000"
