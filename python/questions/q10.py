@@ -11,84 +11,82 @@ from collections import defaultdict
 
 class Conversion:
     
-    def create_conversion_graph(self, log: str) -> dict :
-        graph = defaultdict(lambda : defaultdict(list))
+    def get_currency_conversion_graph(self, conversion_string: str) -> dict:
+       if not conversion_string:
+           return ValueError("Invalid Input")
+       conversion_string_tokens = conversion_string.split(",")
+       graph = defaultdict(lambda: defaultdict(list))
+       for token in conversion_string_tokens:
+           source, destination, carrier, amount = token.split(":")
+           graph[source][destination].append({
+               "amount": int(amount),
+               "carrier": carrier
+           })
         
-        log_tokens = log.split(",")
-        for log_token in log_tokens:
-            source, destination, carrier, amount = log_token.split(":")
-            graph[source][destination].append({
-                "carrier": carrier,
-                "amount": int(amount)
-            })
-        
-        return graph
+       return graph
     
-    def convert(self, log: str ,source: str, destination: str, amount: int) -> int:
-        graph = self.create_conversion_graph(log)
+    def convert(self, conversion_string: str , source: str, destination: str, amount:int) -> list:
+        graph = self.get_currency_conversion_graph(conversion_string)
         
-        if source not in graph or destination not in graph[source]:
-            return []
+        if source not in graph:
+            return ValueError("Invalid Valu")
         
         destination_map = graph[source]
-        
-        if destination not in destination_map:
-            return ValueError("No destination present")
-        
-        results = []
-        for route in destination_map[destination]:
-            results.append({
-                "from": source,
-                "to": destination,
-                "carrier": route["carrier"],
-                "rate": route["amount"],
-                "total_cost": amount * route["amount"]
-            })
-        return results
-        
-        ans = sorted(ans, key=lambda a:a["conversion_cost"])       
+        ans = []
+        for conversion in destination_map[destination]:
+            conversion_amount = int(conversion["amount"])
+            amount_final = conversion_amount * amount
+            ans.append(
+                {
+                    "carrier": conversion["carrier"],
+                    "amount_final": amount_final
+                }
+            )
         return ans
     
-    def convert_with_one_hop(self, log: str ,source: str, required_destination: str, amount: int) -> dict:
-        graph = self.create_conversion_graph(log)
-        results = []
-
-        # Direct
-        results.extend(self.convert(log, source, required_destination, amount))
-
-        # One-hop
+    def convert_with_one_hop(self, conversion_string: str , source: str, destination: str, amount:int)  -> list:
+        graph = self.get_currency_conversion_graph(conversion_string) 
+        if source not in graph:
+            return ValueError("Invalid Valu")
+        
+        destination_map = graph[source] 
+        direct_conversion = self.convert(conversion_string, source, destination, amount)
+        if direct_conversion:
+            return direct_conversion
+        ans = []
+        ans.extend(direct_conversion)
         for mid in graph[source]:
-            if required_destination in graph[mid]:
+            if destination in graph[mid]:
                 for route1 in graph[source][mid]:
-                    for route2 in graph[mid][required_destination]:
+                    for route2 in graph[mid][destination]:
                         total_cost = amount * (route1["amount"] + route2["amount"])
-                        results.append({
+                        ans.append({
                             "from": source,
+                            "to": destination,
                             "via": mid,
-                            "to": required_destination,
                             "carriers": [route1["carrier"], route2["carrier"]],
                             "rates": [route1["amount"], route2["amount"]],
                             "total_cost": total_cost
+                            
                         })
-        return results
+        return ans 
     
     def minimum_cost_coversion(self, log: str, source: str, target: str) -> dict:
         all_routes = self.convert_with_one_hop(log, source, target, 1.0)
         if not all_routes:
             return {}
-        return min(all_routes, key=lambda x: x["total_cost"])                 
-
-           
-       
+        return min(all_routes, key = lambda x:x["total_cost"])         
+                   
+    
 if __name__ == "__main__":
-     conversion = Conversion()
+    conversion = Conversion()
      
-     conversion_string = "USD:CAD:DHL:2,USD:GBP:FEDX:4,CAD:INR:UPS:3,GBP:INR:DHL:1"
+    conversion_string = "USD:CAD:DHL:2,USD:GBP:FEDX:4,CAD:INR:UPS:3,GBP:INR:DHL:1"
      
      
-     print(conversion.convert(conversion_string,"USD", "CAD", 10))
-     print(conversion.convert_with_one_hop(conversion_string, "USD","INR", 10))
-     print(conversion.minimum_cost_coversion(conversion_string, "USD","INR"))
+    print(conversion.convert(conversion_string,"USD", "CAD", 10))
+    print(conversion.convert_with_one_hop(conversion_string, "USD","INR", 10))
+    print(conversion.minimum_cost_coversion(conversion_string, "USD","INR"))
      
         
         
