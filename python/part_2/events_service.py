@@ -56,7 +56,7 @@ Handle real-time requirements:
 3. **Generate event processing summary**
 """
 
-from collections import defaultdict
+import random
 from datetime import datetime
 
 class EventsService:
@@ -114,8 +114,37 @@ class EventsService:
         }
         return customer_status , list(deduped.values())  
     
-    def process_events(self, events: list[dict], max_retries: int =3) :
-        queue = [{"event": e, "status": "pending", "retr"}]
+    def process_events(self, events: list[dict], max_retries: int = 3):
+        queue = [{"event": e, "status": "pending", "retries": 0} for e in events]
+        summary = {"succeeded": 0, "failed": 0, "total": len(queue)}
+        
+        for e in queue:
+            event = e["event"]
+            e["status"] = "processing"
+            
+            while e["retries"] <= max_retries:
+                success = self.processing(e)
+                if success:
+                    e["status"] ="completed"
+                    summary["succeeded"] += 1
+                else:
+                    e["retries"]  +=1
+                    if e["retries"]   > max_retries:
+                        e["status"] = "failed"
+                        summary["failed"]  += 1
+                        break
+                    backoff = 2 ** (e["retries"] - 1)
+                    print(f"Retrying {event['event_id']} in {backoff}s (attempt {e['retries']})")
+                    
+        return queue, summary       
+                    
+                        
+                
+    def processing(self, event: dict) -> bool:
+        if "error" in event:
+            return random.choice([True, False])
+        return True            
+            
             
              
 data = [
@@ -150,7 +179,11 @@ print(filtered_events)
 print(processed_events)
 customer_payment_stauts, processed_events_map = eventsService.get_deduplicated_evetns(processed_events)    
 print(customer_payment_stauts)
-print(processed_events_map)          
+print(processed_events_map)
+queue, summary = eventsService.process_events(processed_events_map, 3)
+print(queue)
+print(summary)
+          
               
                                
         
