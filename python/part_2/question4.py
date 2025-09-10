@@ -44,12 +44,12 @@ Handle compliance requirements:
 2. **Log access tracking** (who viewed what when)
 3. **Export sanitized data** for analytics team
 """
-
-from collections import defaultdict
 import re
 class Transactions:
     
-    def mask_card_number(self, card_number: str) -> str:
+    def mask_card_number(self, card_number:str, level: str = "external") -> str:
+        if level == "internal":
+            return card_number[0:6] + "*" * (len(card_number) -10) + card_number[-4:] 
         masking_character = "*"
         masked = masking_character * (len(card_number) - 4) + card_number[-4:]
         grouped = [masked[i:i+4] for i in range(0, len(masked), 4)]
@@ -111,6 +111,18 @@ class Transactions:
                 "valid_card": self._validate_card_type(transaction["card_number"])
             })
         return {"transactions": transaction_logs}
+    
+    def export_for_analytics(self, data: dict) -> list[dict] :
+        sanitized = []
+        
+        for transaction in data["transactions"]:
+            sanitized.append({
+                "id": transaction["id"],
+                "amount" : transaction["amount"],
+                "merchant": transaction["merchant"],
+                "card_type": self._get_card_type(transaction["card_number"])
+            })
+        return sanitized           
         
 
 transactions = Transactions()
@@ -123,3 +135,4 @@ data = {
 }
 print(transactions.get_masked_transactions(data))            
 print(transactions.generate_masked_transaction_logs(data)) 
+print(transactions.export_for_analytics(data))
