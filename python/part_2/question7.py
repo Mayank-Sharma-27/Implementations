@@ -80,11 +80,11 @@ class Transactions:
         
         return dict(ans), list(customers_with_anomalies), list(high_transacitons)
     
-    def get_pattern_analysis(self, customer_transactions_mappings: dict):
+    def get_pattern_analysis(self, customer_transactions_mappings: dict, minimum_time: int, amount_threshold: int):
         ip_address_changed_customers = set()
         rapid_fire_customers = set()
         risk_scores = {}
-        minimum_time = 10
+        high_risk_transactions = []
         for cus_id, txn in customer_transactions_mappings.items():
             last_location = None
             last_transaction_time = None
@@ -101,8 +101,11 @@ class Transactions:
                     risk_score += 10
                 last_transaction_time = time
                 last_location = location
-            risk_scores[cus_id]  = min(risk_score, 100)       
-        return {"ip_changes": ip_address_changed_customers, "rapid_fire": rapid_fire_customers, "risk_scores": risk_scores}              
+                if t["amount"] > amount_threshold:
+                    high_risk_transactions.append(t)
+            risk_scores[cus_id]  = min(risk_score, 100) 
+        alerts = [cid for cid, score in risk_scores.items() if score >=50]          
+        return {"ip_changes": ip_address_changed_customers, "rapid_fire": rapid_fire_customers, "risk_scores": risk_scores, "high_risk_tranasctions": high_risk_transactions, "alerts": alerts}              
                     
         
         
@@ -129,7 +132,7 @@ data = {
 transacitons = Transactions()
 customer_transactions_mappings = transacitons.get_customer_transactions(data)
 print(transacitons.get_transaction_info(customer_transactions_mappings))
-print(transacitons.get_pattern_analysis(customer_transactions_mappings))
+print(transacitons.get_pattern_analysis(customer_transactions_mappings, 10, 3000))
               
         
         
