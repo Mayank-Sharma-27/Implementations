@@ -45,6 +45,7 @@ Generate reports:
 """
 
 from collections import defaultdict, Counter
+from datetime import datetime
 class Transactions:
     
     def get_customer_transactions(self, data: dict) -> dict:    
@@ -53,6 +54,8 @@ class Transactions:
         for transaciton in data.get("transactions", []):
             customer_id = transaciton["customer_id"]
             customer_transactions_mappings[customer_id].append(transaciton)
+        for cust_id, txn in customer_transactions_mappings.items():
+            txn.sort(key= lambda x:x["timestamp"])   
         return customer_transactions_mappings
     
     def get_transaction_info(self, data: dict) -> dict:
@@ -76,6 +79,33 @@ class Transactions:
                
         
         return dict(ans), list(customers_with_anomalies), list(high_transacitons)
+    
+    def get_pattern_analysis(self, customer_transactions_mappings: dict):
+        ip_address_changed_customers = set()
+        rapid_fire_customers = set()
+        risk_scores = {}
+        minimum_time = 10
+        for cus_id, txn in customer_transactions_mappings.items():
+            last_location = None
+            last_transaction_time = None
+            risk_score = 0
+            for t in txn:
+                location= t["location"]
+                if last_location and last_location != location:
+                    ip_address_changed_customers.add(cus_id)
+                    risk_score +=10
+                time = datetime.fromisoformat(t["timestamp"].replace("Z","+00:00")) 
+                
+                if last_transaction_time and (time - last_transaction_time).total_seconds() / 60 <= minimum_time:
+                    rapid_fire_customers.add(cus_id)
+                    risk_score += 10
+                last_transaction_time = time
+                last_location = location
+            risk_scores[cus_id]  = min(risk_score, 100)       
+        return {"ip_changes": ip_address_changed_customers, "rapid_fire": rapid_fire_customers, "risk_scores": risk_scores}              
+                    
+        
+        
 data = {
   "transactions": [
     {
@@ -99,6 +129,7 @@ data = {
 transacitons = Transactions()
 customer_transactions_mappings = transacitons.get_customer_transactions(data)
 print(transacitons.get_transaction_info(customer_transactions_mappings))
+print(transacitons.get_pattern_analysis(customer_transactions_mappings))
               
         
         
