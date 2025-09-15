@@ -93,29 +93,40 @@ class RateLimiter:
         for i,request in enumerate(requests):
             api_key = request["api_key"]
             limits = data["limits"][api_key]
-            key_request_mappings[api_key].append(request)
-            timestamp = request["timestamp"]
-            window_minute = minute_request_mapping[api_key]
             
+            endpoint = request["endpoint"]
+            ip = request["ip"]
+            timestamp = request["timestamp"]
+            req_per_min = limits.get("requests_per_minute", 100)
+            req_per_hour = limits.get("requests_per_hour", 1000)
+            composite_key = f"{api_key}:{endpoint}:{ip}"
+            window_minute = minute_request_mapping[composite_key]
+            key_request_mappings[api_key].append(request)
             while window_minute and timestamp - window_minute[0] >= 60:
                 window_minute.popleft()
             window_minute.append(timestamp) 
-            window_hour = hour_mapping[api_key]
+            window_hour = hour_mapping[composite_key]
             
             while window_hour and timestamp - window_hour[0] >= 3600:
                 window_hour.popleft()
             window_hour.append(timestamp)
                 
-
-            decision_key= f"{api_key}:{timestamp}:{i}"
             
+            decision_key= f"{api_key}:{endpoint}:{ip}:{timestamp}:{i}"
+            decision ="ALLOW"
             if len(window_minute) > limits["requests_per_minute"]:
-                decision_mapping[decision_key] ="DENY"
+                decision ="DENY"
             elif len(window_hour) > limits["requests_per_hour"]:
-                decision_mapping[decision_key] ="DENY"
+                decision ="DENY"
             else:
-                decision_mapping[decision_key] ="ALLOW"        
-      
+                decision ="ALLOW"        
+            remaining_minute = max(0, req_per_min - len(window_minute))
+            remaining_hour = max(0, req_per_hour - len(window_hour))
+            decision_mapping[decision_key] = {
+                "decision": decision,
+                "X-RateLimit-Remaining-Minute": remaining_minute,
+                "X-RateLimit-Remaining-Hour": remaining_hour
+            }
         return {"decision_mapping": decision_mapping, "key_request_mappings":key_request_mappings}  
 
 data= {
