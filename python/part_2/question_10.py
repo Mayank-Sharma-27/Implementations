@@ -49,7 +49,7 @@ Advanced features:
 3. **Rate limit headers** (X-RateLimit-Remaining, etc.)
 """
 
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, deque
 from datetime import datetime
 class RateLimiter:
       
@@ -84,6 +84,39 @@ class RateLimiter:
       
         return {"decision_mapping": decision_mapping, "key_request_mappings":key_request_mappings}  
 
+    def track_requests_sliding_window(self, data: dict) -> dict:
+        key_request_mappings = defaultdict(list)
+        minute_request_mapping = defaultdict(deque)
+        hour_mapping = defaultdict(deque)
+        decision_mapping = {}
+        requests = data["requests"]
+        for i,request in enumerate(requests):
+            api_key = request["api_key"]
+            limits = data["limits"][api_key]
+            key_request_mappings[api_key].append(request)
+            timestamp = request["timestamp"]
+            window_minute = minute_request_mapping[api_key]
+            
+            while window_minute and timestamp - window_minute[0] >= 60:
+                window_minute.popleft()
+            window_minute.append(timestamp) 
+            window_hour = hour_mapping[api_key]
+            
+            while window_hour and timestamp - window_hour[0] >= 3600:
+                window_hour.popleft()
+            window_hour.append(timestamp)
+                
+
+            decision_key= f"{api_key}:{timestamp}:{i}"
+            
+            if len(window_minute) > limits["requests_per_minute"]:
+                decision_mapping[decision_key] ="DENY"
+            elif len(window_hour) > limits["requests_per_hour"]:
+                decision_mapping[decision_key] ="DENY"
+            else:
+                decision_mapping[decision_key] ="ALLOW"        
+      
+        return {"decision_mapping": decision_mapping, "key_request_mappings":key_request_mappings}  
 
 data= {
     "requests": [
@@ -127,5 +160,6 @@ data= {
     }
 }        
 rate_limiter = RateLimiter()
-print(rate_limiter.track_requests(data))
+#print(rate_limiter.track_requests(data))
+print(rate_limiter.track_requests_sliding_window(data))
 
